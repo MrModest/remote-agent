@@ -99,9 +99,11 @@ jobs:
           version=()
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=(MARKETING_VERSION="${GITHUB_REF_NAME#v}"); fi
           xcodegen
+          # SwiftTerm, the client's terminal, has Metal shaders and a build plugin.
+          xcodebuild -downloadComponent MetalToolchain
           # No team or Developer ID here, so the app is signed ad hoc.
           xcodebuild -project RemoteAgent.xcodeproj -scheme "$SCHEME" -configuration Release \
-            -destination 'generic/platform=macOS' -derivedDataPath build \
+            -destination 'generic/platform=macOS' -derivedDataPath build -skipPackagePluginValidation \
             ARCHS=arm64 DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- "${version[@]}" build
         env:
           SCHEME: ${{ matrix.scheme }}

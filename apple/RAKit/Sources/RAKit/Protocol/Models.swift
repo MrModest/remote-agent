@@ -390,4 +390,26 @@ public struct ServerInfo: Codable, Hashable, Sendable {
     public var version: String
     public var roots: [String]?
     public var deviceId: String?
+    /// The server runs shells for sessions (`GET /v1/terminal`).
+    public var terminal: Bool?
+}
+
+/// A text frame on a terminal socket. The shell's output and the user's
+/// input travel as binary frames.
+public struct TerminalMessage: Codable, Hashable, Sendable {
+    public var type: String  // attached, reset, exit or error from rad; resize or close from a client
+    public var id: String?
+    public var offset: UInt64?
+    public var reset: Bool?
+    public var cols: Int?
+    public var rows: Int?
+    public var exitCode: Int?
+    public var code: String?
+    public var message: String?
+
+    public init(type: String, cols: Int? = nil, rows: Int? = nil) {
+        self.type = type
+        self.cols = cols
+        self.rows = rows
+    }
 }

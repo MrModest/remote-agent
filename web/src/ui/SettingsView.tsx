@@ -3,7 +3,7 @@ import { useState } from "react";
 import { UserBubble } from "./items/ItemView";
 import { Markdown } from "./Markdown";
 import { Modal } from "./primitives";
-import { interfaceSizes, messageFonts, messageSizes, settings, useSettings, type Appearance } from "./settings";
+import { interfaceSizes, messageFonts, messageSizes, settings, terminalPlacements, useSettings, type Appearance, type TerminalPlacement } from "./settings";
 
 const codeFonts = ["", "Menlo", "SF Mono", "Monaco", "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", "Source Code Pro", "IBM Plex Mono"];
 const otherFont = "__other";
@@ -74,6 +74,21 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </section>
+
+        <h4 className="form-header">Terminal</h4>
+        <section className="form-section">
+          <label className="form-row">
+            <span>Opens</span>
+            <select value={s.terminalPlacement} onChange={(e) => settings.update({ terminalPlacement: e.target.value as TerminalPlacement })}>
+              {terminalPlacements.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+        <p className="form-footer">Where a session's terminal opens. In a narrow window it takes the place of the messages.</p>
 
         <section className="form-section">
           <button className="form-row link" disabled={s.isDefault} onClick={() => settings.restoreDefaults()}>

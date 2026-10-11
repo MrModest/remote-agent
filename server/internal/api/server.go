@@ -23,6 +23,7 @@ import (
 	"remote-agent/internal/model"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/terminal"
 )
 
 var Version = "dev"
@@ -40,6 +41,10 @@ type Server struct {
 	// WebOrigins are the web pages allowed to call rad, as host patterns
 	// ("localhost:*") or, with a scheme, origin patterns ("https://x.dev").
 	WebOrigins []string
+
+	// Terminals runs the shells clients open from a session's menu; nil
+	// offers none.
+	Terminals *terminal.Manager
 }
 
 func NewServer(st *store.Store, hub *events.Hub, orch *orchestrator.Orchestrator, fs *fsbrowse.Browser, imgs *images.Store, serverID, name string, log *slog.Logger) *Server {
@@ -51,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("GET /v1/ws", s.ws)
+	mux.HandleFunc("GET /v1/terminal", s.terminal)
 	mux.HandleFunc("POST /v1/images", s.uploadImage)
 	mux.HandleFunc("GET /v1/images/{id}", s.getImage)
 	return s.cors(mux)
@@ -114,6 +120,15 @@ type serverInfo struct {
 	Name            string `json:"name"`
 	ProtocolVersion int    `json:"protocolVersion"`
 	Version         string `json:"version"`
+}
+
+// serverInfoResult is server.info's result: the health check's fields plus
+// what only a paired device sees.
+type serverInfoResult struct {
+	serverInfo
+	Roots    []string `json:"roots"`
+	DeviceID string   `json:"deviceId"`
+	Terminal bool     `json:"terminal,omitempty"` // GET /v1/terminal is there
 }
 
 func (s *Server) info() serverInfo {

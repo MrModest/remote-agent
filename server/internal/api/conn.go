@@ -83,7 +83,7 @@ func (c *conn) run(parent context.Context) {
 	c.ctx, c.cancel = context.WithCancel(parent)
 	defer c.cancel()
 	go c.writer()
-	go c.keepalive()
+	go c.s.keepalive(c.ctx, c.ws, c.device.ID, c.cancel)
 	defer c.unsubscribeAll()
 	for {
 		_, data, err := c.ws.Read(c.ctx)
@@ -111,33 +111,6 @@ func (c *conn) writer() {
 			err := c.ws.Write(ctx, websocket.MessageText, b)
 			cancel()
 			if err != nil {
-				c.cancel()
-				return
-			}
-		}
-	}
-}
-
-func (c *conn) keepalive() {
-	ping := time.NewTicker(pingInterval)
-	check := time.NewTicker(revalidateEach)
-	defer ping.Stop()
-	defer check.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ping.C:
-			ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-			err := c.ws.Ping(ctx)
-			cancel()
-			if err != nil {
-				c.cancel()
-				return
-			}
-		case <-check.C:
-			if ok, err := c.s.st.DeviceExists(c.ctx, c.device.ID); err == nil && !ok {
-				c.ws.Close(4001, "device revoked")
 				c.cancel()
 				return
 			}

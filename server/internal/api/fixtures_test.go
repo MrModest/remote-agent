@@ -22,7 +22,7 @@ var update = flag.Bool("update", false, "rewrite protocol/fixtures")
 func fixtures() map[string]any {
 	t0 := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	t1 := t0.Add(5 * time.Second)
-	exit := 0
+	exit, signalled := 0, 129
 	sess := &model.Session{
 		ID: "s1", ProjectID: "p1", Harness: "claude", Model: "sonnet", Effort: "high", Mode: "default",
 		Workspace: model.Workspace{Kind: model.WorkspaceWorktree, Path: "/w/s1", Branch: "ra/fix-tests", BaseRef: "main"},
@@ -111,6 +111,13 @@ func fixtures() map[string]any {
 			Files: []gitx.FileStat{{Path: "main.go", Status: gitx.Modified, Additions: 3, Deletions: 1}, {Path: "new.go", OldPath: "old.go", Status: gitx.Renamed}, {Path: "logo.png", Status: gitx.Added, Binary: true}},
 			Patch: "diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,4 @@\n package main\n-func a() {}\n+func a() { b() }\n+func b() {}\n+\n", Truncated: false}},
 		"response_session.json": response{ID: json.RawMessage("6"), Result: sess},
+		"response_server_info.json": response{ID: json.RawMessage("1"), Result: serverInfoResult{
+			serverInfo: serverInfo{ServerID: "srv1", Name: "studio", ProtocolVersion: model.ProtocolVersion, Version: "0.4.0"},
+			Roots:      []string{"/Users/me/projects"}, DeviceID: "dev1", Terminal: true}},
+		"terminal_attached.json": model.TerminalMessage{Type: "attached", ID: "5f0c2a9e1b7d3c48", Offset: 262130, Reset: true, Cols: 80, Rows: 24},
+		"terminal_resize.json":   model.TerminalMessage{Type: "resize", Cols: 120, Rows: 40},
+		"terminal_exit.json":     model.TerminalMessage{Type: "exit", ExitCode: &signalled},
+		"terminal_error.json":    model.TerminalMessage{Type: "error", Code: "gone", Message: "the shell has ended"},
 		"http_pair_response.json": pairResponse{serverInfo: serverInfo{ServerID: "srv1", Name: "studio", ProtocolVersion: model.ProtocolVersion, Version: "dev"},
 			Token: "0123abcd", DeviceID: "dev1"},
 	}

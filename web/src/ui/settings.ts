@@ -3,6 +3,15 @@ import { storage } from "../store/storage";
 
 export type Appearance = "system" | "dark" | "light";
 
+/** Where a session's terminal opens in a wide window; a narrow one always
+ *  shows it in place of the messages. */
+export type TerminalPlacement = "over" | "below" | "right";
+export const terminalPlacements: { id: TerminalPlacement; name: string }[] = [
+  { id: "over", name: "Instead of the messages" },
+  { id: "below", name: "Below the messages" },
+  { id: "right", name: "Right sidebar" },
+];
+
 /** The body text size at each step of the interface setting. */
 export const interfaceSizes = [12, 13, 14, 15, 16, 18, 20];
 export const defaultInterface = 2;
@@ -30,6 +39,7 @@ class Settings extends Observable {
   /** "" for the system's monospaced font, or a family name. */
   codeFont = "";
   diffWrap = true;
+  terminalPlacement: TerminalPlacement = "over";
 
   constructor() {
     super();
@@ -40,9 +50,11 @@ class Settings extends Observable {
     this.messageFont = storage.get("messageFont") ?? "";
     this.codeFont = storage.get("codeFont") ?? "";
     this.diffWrap = storage.get("diffWrap") !== "false";
+    const t = storage.get("terminalPlacement");
+    if (t === "below" || t === "right") this.terminalPlacement = t;
   }
 
-  update(patch: Partial<Pick<Settings, "appearance" | "interface" | "messages" | "messageFont" | "codeFont" | "diffWrap">>) {
+  update(patch: Partial<Pick<Settings, "appearance" | "interface" | "messages" | "messageFont" | "codeFont" | "diffWrap" | "terminalPlacement">>) {
     Object.assign(this, patch);
     storage.set("appearance", this.appearance);
     storage.set("interfaceTextSize", String(this.interface));
@@ -50,6 +62,7 @@ class Settings extends Observable {
     storage.set("messageFont", this.messageFont);
     storage.set("codeFont", this.codeFont);
     storage.set("diffWrap", String(this.diffWrap));
+    storage.set("terminalPlacement", this.terminalPlacement);
     this.changed();
     this.apply();
   }
@@ -60,12 +73,13 @@ class Settings extends Observable {
       this.interface === defaultInterface &&
       this.messages === defaultMessages &&
       !this.messageFont &&
-      !this.codeFont
+      !this.codeFont &&
+      this.terminalPlacement === "over"
     );
   }
 
   restoreDefaults() {
-    this.update({ appearance: "system", interface: defaultInterface, messages: defaultMessages, messageFont: "", codeFont: "" });
+    this.update({ appearance: "system", interface: defaultInterface, messages: defaultMessages, messageFont: "", codeFont: "", terminalPlacement: "over" });
   }
 
   private dark = matchMedia("(prefers-color-scheme: dark)");

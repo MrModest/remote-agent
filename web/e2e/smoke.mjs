@@ -128,6 +128,36 @@ if (await fileRow.count()) {
 }
 await page.keyboard.press("Escape");
 
+step("terminal");
+const terminalRows = (text) => page.locator(".terminal .xterm-rows", { hasText: text });
+await page.getByRole("button", { name: "Session", exact: true }).click();
+await page.getByRole("menuitem", { name: "Terminal" }).click();
+await page.locator(".terminal .xterm").waitFor();
+await page.waitForTimeout(1000); // the shell starting
+await page.keyboard.type("echo $((6*7))");
+await page.keyboard.press("Enter");
+await terminalRows("42").waitFor();
+await page.keyboard.press("Escape"); // the shell's, not the page's
+await shot("terminal-over");
+// Hidden and shown again, the same shell, with its output.
+await page.getByRole("button", { name: "Hide Terminal" }).click();
+await page.getByText("Echo: write a.txt").waitFor();
+await page.getByRole("button", { name: "Session", exact: true }).click();
+await page.getByRole("menuitem", { name: "Terminal" }).click();
+await terminalRows("42").waitFor();
+for (const placement of ["below", "right"]) {
+  await page.locator(".server-menu-button").click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await page.getByLabel("Opens").selectOption(placement);
+  await page.getByRole("button", { name: "Done" }).click();
+  await page.locator(`.terminal-${placement} .terminal .xterm-rows`, { hasText: "42" }).waitFor();
+  await shot("terminal-" + placement);
+}
+await page.getByRole("button", { name: "Terminal", exact: true }).click();
+await page.getByRole("menuitem", { name: "Close Shell" }).click();
+await page.getByText("The shell was closed.").waitFor();
+await page.getByRole("button", { name: "Hide Terminal" }).click();
+
 step("worktree session: changes and revert");
 await page.getByRole("button", { name: "New session" }).first().click();
 await page.locator(".harness-row", { hasText: "Fake" }).click();

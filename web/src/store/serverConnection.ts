@@ -5,6 +5,7 @@ import { imageCache } from "./imageCache";
 import { Observable } from "./observable";
 import type { SavedServer } from "./serverStore";
 import { SessionStore, type SessionHost } from "./sessionStore";
+import { TerminalSession } from "./terminalSession";
 
 export type ConnectionState =
   | { kind: "idle" }
@@ -57,6 +58,14 @@ export class ServerConnection extends Observable implements SessionHost {
 
   get isConnected(): boolean {
     return this.state.kind === "connected";
+  }
+
+  /** The session's shell on the server, for one view to show. */
+  terminal(sessionID: string): TerminalSession {
+    return new TerminalSession(
+      { connected: () => this.isConnected, open: (query) => this.client.openSocket("/v1/terminal?" + query, "rad.terminal.v1") },
+      sessionID,
+    );
   }
 
   // Lifecycle

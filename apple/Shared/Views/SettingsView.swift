@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage(TextSize.interfaceKey) private var interface = TextSize.defaultInterface
     @AppStorage(TextSize.messagesKey) private var messages = TextSize.defaultMessages
     @AppStorage(Appearance.key) private var appearance = Appearance.system
+    @AppStorage(TerminalPlacement.key) private var terminalPlacement = TerminalPlacement.over
     #if os(macOS)
     @AppStorage(FontChoice.messageKey) private var messageFont = ""
     @AppStorage(FontChoice.codeKey) private var codeFont = ""
@@ -66,6 +67,18 @@ struct SettingsView: View {
                     Text("Preview").formHeaderFont()
                 }
 
+                if offersTerminalPlacement {
+                    Section {
+                        Picker("Opens", selection: $terminalPlacement) {
+                            ForEach(TerminalPlacement.allCases) { Text($0.title).tag($0) }
+                        }
+                    } header: {
+                        Text("Terminal").formHeaderFont()
+                    } footer: {
+                        Text("Where a session's terminal opens. In a narrow window it takes the place of the messages.").formFooterFont()
+                    }
+                }
+
                 Section {
                     Button("Restore Defaults", action: restoreDefaults)
                         .disabled(isDefault)
@@ -82,6 +95,15 @@ struct SettingsView: View {
                 Button("Done") { dismiss() }
             }
         }
+        #endif
+    }
+
+    /// An iPhone shows the terminal in place of the messages; there's no room beside them.
+    private var offersTerminalPlacement: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        true
         #endif
     }
 
@@ -147,19 +169,20 @@ struct SettingsView: View {
     }
 
     private var isDefault: Bool {
-        appearance == .system && followsSystem && messages == TextSize.defaultMessages
+        appearance == .system && followsSystem && messages == TextSize.defaultMessages && terminalPlacement == .over
     }
     #else
     private var interfaceFooter: String { "Lists and labels." }
 
     private var isDefault: Bool {
         appearance == .system && interface == TextSize.defaultInterface && messages == TextSize.defaultMessages
-            && messageFont.isEmpty && codeFont.isEmpty
+            && messageFont.isEmpty && codeFont.isEmpty && terminalPlacement == .over
     }
     #endif
 
     private func restoreDefaults() {
         appearance = .system
+        terminalPlacement = .over
         interface = TextSize.defaultInterface
         messages = TextSize.defaultMessages
         #if os(iOS)

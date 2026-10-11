@@ -18,6 +18,13 @@
   --crust: #dce0e8;
   --raised: #eff1f5;
   --shadow: rgb(0 0 0 / 0.12);
+  /* The terminal's 16 ANSI colours, from Catppuccin's terminal themes. */
+  --term-0: #5c5f77; --term-1: #d20f39; --term-2: #40a02b; --term-3: #df8e1d;
+  --term-4: #1e66f5; --term-5: #ea76cb; --term-6: #179299; --term-7: #acb0be;
+  --term-8: #6c6f85; --term-9: #d20f39; --term-10: #40a02b; --term-11: #df8e1d;
+  --term-12: #1e66f5; --term-13: #ea76cb; --term-14: #179299; --term-15: #bcc0cc;
+  --term-cursor: #dc8a78;
+  --term-selection: #acb0be;
 }
 
 :root[data-theme="dark"] {
@@ -37,6 +44,13 @@
   --crust: #232634;
   --raised: #414559;
   --shadow: rgb(0 0 0 / 0.3);
+  /* The terminal's 16 ANSI colours, from Catppuccin's terminal themes. */
+  --term-0: #51576d; --term-1: #e78284; --term-2: #a6d189; --term-3: #e5c890;
+  --term-4: #8caaee; --term-5: #f4b8e4; --term-6: #81c8be; --term-7: #b5bfe2;
+  --term-8: #626880; --term-9: #e78284; --term-10: #a6d189; --term-11: #e5c890;
+  --term-12: #8caaee; --term-13: #f4b8e4; --term-14: #81c8be; --term-15: #a5adce;
+  --term-cursor: #f2d5cf;
+  --term-selection: #626880;
 }
 
 :root {
@@ -1260,3 +1274,126 @@ button.form-row:hover:not(:disabled) { background: var(--surface0); }
   #root > .session { height: 100dvh; }
 }
 .turn-footer.c-red { color: var(--red); }
+
+/* The terminal: in place of the messages, below them, or beside them. */
+.session-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.session-frame.terminal-right { flex-direction: row; }
+.session-frame > .session { min-width: 0; }
+.session-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.session-main.covered > :not(.terminal) { visibility: hidden; }
+.session-main > .terminal {
+  position: absolute;
+  inset: 0;
+}
+.terminal {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--base);
+}
+.terminal-below > .terminal { flex: none; border-top: 1px solid var(--surface0); }
+.terminal-right > .terminal { flex: none; border-left: 1px solid var(--surface0); }
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 2px 6px 2px 12px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+  color: var(--subtext);
+  font-size: 0.85em;
+}
+.terminal-bar .terminal-folder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.terminal-screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+.terminal-xterm { width: 100%; height: 100%; }
+.terminal-xterm .xterm { height: 100%; }
+/* xterm paints the rows; the space under the last one is the viewport's. */
+.terminal-xterm .xterm-viewport { background-color: var(--base); }
+.terminal-status {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--mantle);
+  color: var(--subtext);
+  font-size: 0.85em;
+}
+.terminal-banner {
+  position: absolute;
+  left: var(--margin);
+  right: var(--margin);
+  bottom: var(--margin);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--r-card);
+  background: var(--mantle);
+}
+.terminal-banner > span { flex: 1; }
+.terminal-keys {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+}
+.terminal-keys button {
+  flex: none;
+  min-width: 40px;
+  padding: 6px 8px;
+  border-radius: var(--r-inset);
+  background: var(--surface0);
+  color: var(--text);
+  font: inherit;
+}
+.terminal-keys button.on { background: var(--accent); color: var(--on-accent); }
+.panel-handle {
+  flex: none;
+  background: var(--mantle);
+  touch-action: none;
+}
+.terminal-below > .panel-handle { height: 8px; cursor: row-resize; }
+.terminal-right > .panel-handle { width: 8px; cursor: col-resize; }
+.panel-handle::after {
+  content: "";
+  display: block;
+  margin: 2px auto;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface1);
+}
+.terminal-right > .panel-handle::after { width: 4px; height: 36px; margin: calc(50vh - 18px) auto 0; }

@@ -29,6 +29,7 @@ import (
 	"remote-agent/internal/model"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/terminal"
 )
 
 type testServer struct {
@@ -53,8 +54,11 @@ func startServer(t *testing.T) *testServer {
 	root := t.TempDir()
 	srv := api.NewServer(st, hub, orch, fsbrowse.New([]string{root}), imgs, "srv-1", "test-host", log)
 	srv.WebOrigins = []string{"localhost:*", "https://web.example"}
+	terms := terminal.NewManager(terminal.Options{Shell: "/bin/sh", Env: []string{"HOME=" + t.TempDir(), "PS1=$ ", "ENV="}, Log: log})
+	srv.Terminals = terms
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
+	t.Cleanup(terms.Shutdown) // first: httptest doesn't wait for the terminal sockets' handlers
 	return &testServer{url: ts.URL, st: st, root: root}
 }
 

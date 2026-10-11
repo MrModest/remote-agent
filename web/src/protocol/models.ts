@@ -302,6 +302,23 @@ export interface ServerInfo {
   version: string;
   roots?: string[];
   deviceId?: string;
+  /** The server runs shells for sessions (`GET /v1/terminal`). */
+  terminal?: boolean;
+}
+
+/** A text frame on a terminal socket. The shell's output and the user's
+ *  input travel as binary frames. */
+export interface TerminalMessage {
+  /** attached, reset, exit or error from rad; resize or close from a client. */
+  type: string;
+  id?: string;
+  offset?: number;
+  reset?: boolean;
+  cols?: number;
+  rows?: number;
+  exitCode?: number;
+  code?: string;
+  message?: string;
 }
 
 export interface PairResult {

@@ -30,6 +30,10 @@ Notes for coding agents working on this repo. What the project is and how it is 
   - Assert on the emitted `harness.Event`s.
   - To exercise the orchestrator, extend `server/internal/harness/fake`.
 - **Slash commands:** a prompt of `/<name>` goes to the harness like any other; `Input.Command` recognizes one. Claude Code runs them itself. An adapter runs the ones its agent takes only as a request of its own (Codex's `thread/compact/start`, Pi's `compact`) and ends the turn when it's done. `HarnessInfo.Commands` lists the ones the apps offer in the session's ⋯ menu, so list a command there only once the adapter runs it.
+- **Terminal:** `server/internal/terminal` runs a login shell per session in a pseudo-terminal (`creack/pty`) and keeps its last 256 KiB of output, so clients resume or redraw; `internal/api/terminal.go` serves it on `GET /v1/terminal` (see "Terminal" in PROTOCOL.md). The clients' side is `TerminalSession` in RAKit and `web/src/store/terminalSession.ts`, shown with SwiftTerm (`Shared/Views/TerminalHost.swift`, the only file that imports it) and xterm.js (`web/src/ui/TerminalPanel.tsx`).
+  - Tests run `/bin/sh` in a real pty, never the developer's shell, and wait for output the shell computes (`echo $((6*7))` → `42`), since the terminal echoes what's typed.
+  - SwiftTerm is pinned to an exact version: 1.99 is the 2.0 preview, with a different API. It needs Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) and `-skipPackagePluginValidation` for its build plugin.
+  - When testing, open terminals only on a scratch rad: a shell on the developer's rad is theirs.
 - **Xcode project:** `apple/project.yml` is the source of truth. `RemoteAgent.xcodeproj` is generated and gitignored, and the `Info.plist` and entitlements files are generated from `project.yml`, so edit permissions and plist keys there. Run `xcodegen` after adding files or changing the spec.
 - **Signing:** the bundle ID lives in `apple/Signing.xcconfig`. It includes the developer's gitignored `apple/Local.xcconfig`, which holds their `DEVELOPMENT_TEAM`. The Mac app shares the bundle ID; without a team it is signed ad hoc.
 - **App icon:** drawn by `apple/scripts/make-app-icon.swift`, for iOS and, in the macOS shape, for the Mac. Edit the script and rerun it; don't edit the PNGs.
@@ -70,9 +74,9 @@ cd server && gofmt -l internal cmd && go vet ./... && go test -race ./...
 cd apple/RAKit && swift test
 cd web && npm ci && npm run typecheck && npm test && npm run build
 cd apple && xcodegen && xcodebuild -project RemoteAgent.xcodeproj -scheme RemoteAgent-iOS \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build build
+  -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build -skipPackagePluginValidation build
 cd apple && xcodebuild -project RemoteAgent.xcodeproj -scheme RemoteAgent-macOS \
-  -destination 'platform=macOS' -derivedDataPath build build
+  -destination 'platform=macOS' -derivedDataPath build -skipPackagePluginValidation build
 cd apple && xcodebuild -project RemoteAgent.xcodeproj -scheme RemoteAgentServer \
   -destination 'platform=macOS' -derivedDataPath build build
 ```

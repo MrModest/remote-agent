@@ -91,5 +91,31 @@ struct FixtureTests {
 
         let p = try dec.decode(PairResult.self, from: load("http_pair_response.json"))
         #expect(p.token == "0123abcd")
+
+        let info = try dec.decode(Response<ServerInfo>.self, from: load("response_server_info.json"))
+        #expect(info.result?.terminal == true)
+        #expect(info.result?.deviceId == "dev1")
+    }
+
+    @Test func terminalMessages() throws {
+        let dec = WireCoding.decoder()
+        let a = try dec.decode(TerminalMessage.self, from: load("terminal_attached.json"))
+        #expect(a.type == "attached" && a.reset == true && a.offset == 262130 && a.cols == 80 && a.id?.isEmpty == false)
+        let r = try dec.decode(TerminalMessage.self, from: load("terminal_resize.json"))
+        #expect(r == TerminalMessage(type: "resize", cols: 120, rows: 40))
+        // What a client sends encodes as the server's fixture does.
+        let sent = try dec.decode(TerminalMessage.self, from: try WireCoding.encoder().encode(TerminalMessage(type: "resize", cols: 120, rows: 40)))
+        #expect(sent == r)
+        #expect(try dec.decode(TerminalMessage.self, from: load("terminal_exit.json")).exitCode == 129)
+        let e = try dec.decode(TerminalMessage.self, from: load("terminal_error.json"))
+        #expect(e.code == "gone" && e.message?.isEmpty == false)
+    }
+
+    @Test func terminalQuery() {
+        func q(_ items: [URLQueryItem]) -> String { items.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&") }
+        #expect(q(TerminalSession.query(sessionID: "s1", cols: 80, rows: 24, create: true, shellID: nil, offset: 0))
+                == "session=s1&cols=80&rows=24&create=1")
+        #expect(q(TerminalSession.query(sessionID: "s1", cols: 100, rows: 30, create: false, shellID: "ab", offset: 4096))
+                == "session=s1&cols=100&rows=30&id=ab&offset=4096")
     }
 }

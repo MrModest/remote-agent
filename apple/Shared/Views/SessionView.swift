@@ -8,6 +8,14 @@ struct SessionView: View {
     @State private var sending = false
     @State private var error: String?
     @State private var showDiff = false
+    @State private var showTerminal = false
+    @State private var terminalFocused = false
+    @State private var height: CGFloat = 0
+    @AppStorage(TerminalPlacement.key) private var placementSetting = TerminalPlacement.over
+    @AppStorage("terminalHeight") private var terminalHeight: Double = 280
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     @State private var dictation = Dictation()
     @State private var attachments = Attachments()
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
@@ -18,6 +26,63 @@ struct SessionView: View {
     private var project: Project? { session.flatMap { connection.projects[$0.projectId] } }
 
     var body: some View {
+        // The transcript keeps its place: in place of the messages it stays
+        // underneath, hidden, and the terminal below them is the stack's
+        // second child.
+        VStack(spacing: 0) {
+            transcript
+                .opacity(covered ? 0 : 1)
+                .allowsHitTesting(!covered)
+                .accessibilityHidden(covered)
+                .overlay {
+                    if covered, let s = session { terminalPanel(s) }
+                }
+            if showTerminal, placement == .below, let s = session {
+                PanelResizeHandle(height: $terminalHeight, range: 120...max(120, Double(height) - 200))
+                terminalPanel(s)
+                    .frame(height: min(terminalHeight, max(120, Double(height) - 200)))
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .navigationTitle(session?.title ?? "Session")
+        #if os(macOS)
+        .navigationSubtitle(session.map(macSubtitle) ?? "")
+        #endif
+        .inlineTitle()
+        .toolbar { toolbar }
+        .sheet(isPresented: $showDiff) {
+            NavigationStack {
+                DiffView(store: store, initialTurn: nil, canRevert: session?.workspace.kind == .worktree)
+            }
+            .presentationSizing(.page)
+            .appStyle()
+        }
+        .inspector(isPresented: terminalShown(.right)) {
+            // The Mac builds a hidden inspector's content too; it would connect.
+            if showTerminal, placement == .right, let s = session {
+                terminalPanel(s)
+                    .inspectorColumnWidth(min: 320, ideal: 440, max: 900)
+            }
+        }
+        .alert("Error", isPresented: .init(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK") { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
+        .onChange(of: dictation.error) { _, e in
+            if let e { error = e; dictation.error = nil }
+        }
+        .onChange(of: attachments.error) { _, e in
+            if let e { error = e; attachments.error = nil }
+        }
+        .onAppear { store.activate() }
+        .onDisappear {
+            dictation.stop()
+            store.deactivate()
+        }
+    }
+
+    private var transcript: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Metrics.gap) {
                 if !store.synced {
@@ -67,35 +132,34 @@ struct SessionView: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) { composer }
         .acceptsImages(attachments, via: connection, pasting: composerFocused)
-        .navigationTitle(session?.title ?? "Session")
-        #if os(macOS)
-        .navigationSubtitle(session.map(macSubtitle) ?? "")
+    }
+
+    // MARK: Terminal
+
+    /// Where the terminal shows: on an iPhone or in a narrow window always
+    /// in place of the messages, otherwise where Settings says.
+    private var placement: TerminalPlacement {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone || sizeClass == .compact { return .over }
         #endif
-        .inlineTitle()
-        .toolbar { toolbar }
-        .sheet(isPresented: $showDiff) {
-            NavigationStack {
-                DiffView(store: store, initialTurn: nil, canRevert: session?.workspace.kind == .worktree)
-            }
-            .presentationSizing(.page)
-            .appStyle()
-        }
-        .alert("Error", isPresented: .init(get: { error != nil }, set: { if !$0 { error = nil } })) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
-        .onChange(of: dictation.error) { _, e in
-            if let e { error = e; dictation.error = nil }
-        }
-        .onChange(of: attachments.error) { _, e in
-            if let e { error = e; attachments.error = nil }
-        }
-        .onAppear { store.activate() }
-        .onDisappear {
-            dictation.stop()
-            store.deactivate()
-        }
+        return placementSetting
+    }
+
+    /// The terminal is in place of the messages.
+    private var covered: Bool { showTerminal && placement == .over }
+
+    private func terminalShown(_ p: TerminalPlacement) -> Binding<Bool> {
+        Binding(get: { showTerminal && placement == p }, set: { showTerminal = $0 })
+    }
+
+    private func terminalPanel(_ s: Session) -> some View {
+        TerminalPanel(connection: connection, sessionID: s.id, folder: s.workspace.path,
+                      focused: $terminalFocused, hide: { showTerminal = false })
+    }
+
+    /// Return and Esc belong to the terminal while it has the keyboard.
+    private var terminalHasKeys: Bool {
+        showTerminal && (terminalFocused || placement == .over)
     }
 
     // MARK: Rows
@@ -228,7 +292,7 @@ struct SessionView: View {
         .buttonStyle(.borderless)
         .roundButtonFrame()
         .tint(mainAction == .stopDictation ? Palette.red : Palette.accent)
-        .keyboardShortcut(mainAction == .send ? KeyboardShortcut(.return) : nil)
+        .keyboardShortcut(mainAction == .send && !terminalHasKeys ? KeyboardShortcut(.return) : nil)
         // While dictation finishes, the final pass is still rewriting the draft.
         .disabled(session?.archived == true || (mainAction == .send && !canSend) || dictation.phase == .finishing)
         .accessibilityLabel(mainAction.label)
@@ -347,6 +411,11 @@ struct SessionView: View {
                 }
                 if project?.isGitRepo == true {
                     Button("Changes", systemImage: "plusminus") { showDiff = true }
+                }
+                if connection.info?.terminal == true, session?.archived == false {
+                    Button(showTerminal ? "Hide Terminal" : "Terminal", systemImage: "apple.terminal") {
+                        showTerminal.toggle()
+                    }
                 }
                 if let commands = harness?.commands, !commands.isEmpty {
                     Section("Commands") {

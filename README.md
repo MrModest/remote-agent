@@ -230,6 +230,10 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
 - **Commands:** a session's ⋯ menu runs slash commands. For now there is `/compact`, which has the agent summarize the conversation so far to free up context, for Claude Code, Codex and Pi. The transcript marks it with *Context compacted*, and the context gauge drops.
   - Typing `/compact` as a prompt does the same, and `/compact <instructions>` tells Claude Code or Pi what the summary should keep; Codex takes no instructions for it.
   - Claude Code runs it itself. rad runs it with Codex's and Pi's own compaction, since they don't take `/compact` in a prompt.
+- **Terminal:** a session's ⋯ menu opens a shell on your computer, in the session's folder (its worktree, for a worktree session). It's your login shell, in a real terminal, so `git`, `vim`, `htop` and the agents' CLIs work as they do at the computer.
+  - The shell keeps running when you close the terminal, switch apps or lose the connection, and reopening it picks up where it was: rad keeps its last 256 KiB of output. It ends when you `exit` it or choose *Close Shell*, when the session is archived, or when rad stops. Each session has one shell, shared by all your devices.
+  - On the Mac, iPad and the web client in a wide window, Settings › Terminal picks where it opens: instead of the messages, below them, or in a sidebar on the right. On an iPhone, or in a narrow window, it takes the place of the messages.
+  - On iPhone and iPad, the bar above the keyboard has Esc, Ctrl, Tab and the arrow keys; the web client shows similar keys on touch screens.
 - **Stop:** this interrupts the current turn. *Force stop* kills the agent process. Idle agents are stopped after `idle_timeout` and resume transparently on the next prompt.
 - **Text size:** Settings has two sizes: one for the interface, such as lists and labels, and one for messages: your prompts, the agent's replies and its tool calls. On the Mac it is under Remote Agent › Settings… (⌘,). On iPhone and iPad, tap the gear on the server list or open a server's ⋯ menu. On iOS the interface follows the system's text size until you turn off **Match System**.
   - On the Mac, Settings also picks the messages' font, from the system font's designs or any installed family, and a code font from the installed fixed-width ones. The code font is used for code in messages, tool calls and diffs.
@@ -280,7 +284,7 @@ Unknown keys are errors, so a typo stops rad with the line number rather than be
 
 ## Security model
 
-- A paired device can make agents run arbitrary commands on your machine. Treat device tokens like SSH keys.
+- A paired device can make agents run arbitrary commands on your machine, and open a shell there, as the user rad runs as. Treat device tokens like SSH keys. Under the Server app, that shell has the permissions you gave the app.
 - rad listens on all interfaces, but every request except pairing needs a device token. To keep it off other networks entirely, set `listen` to loopback and your Tailscale address.
 - Pairing codes are single-use and expire after 10 minutes.
 - Tokens are 256-bit random values. Only their SHA-256 hash is stored, and the phone keeps the token in the Keychain. The web client keeps it in the browser's local storage, for its origin only.

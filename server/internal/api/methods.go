@@ -105,11 +105,7 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 	o := c.s.orch
 	switch method {
 	case "server.info":
-		info := c.s.info()
-		return map[string]any{
-			"serverId": info.ServerID, "name": info.Name, "protocolVersion": info.ProtocolVersion,
-			"version": info.Version, "roots": c.s.fs.Roots(), "deviceId": c.device.ID,
-		}, nil
+		return serverInfoResult{serverInfo: c.s.info(), Roots: c.s.fs.Roots(), DeviceID: c.device.ID, Terminal: c.s.Terminals != nil}, nil
 
 	case "device.unpair":
 		// The phone forgets this server: revoke its own token. The socket is
@@ -170,7 +166,13 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 		return call(raw, func(p setModeParams) (any, error) { return nil, o.SetMode(ctx, p.SessionID, p.Mode) })
 
 	case "session.archive":
-		return call(raw, func(p archiveParams) (any, error) { return nil, o.Archive(ctx, p.SessionID, p.RemoveWorktree) })
+		return call(raw, func(p archiveParams) (any, error) {
+			// End the session's shell first, so nothing it runs writes into
+			// a worktree as it's removed, and again for one opened meanwhile.
+			c.s.closeTerminal(p.SessionID)
+			defer c.s.closeTerminal(p.SessionID)
+			return nil, o.Archive(ctx, p.SessionID, p.RemoveWorktree)
+		})
 
 	case "approval.respond":
 		return call(raw, func(p respondParams) (any, error) {

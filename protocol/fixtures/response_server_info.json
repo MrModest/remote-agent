@@ -1,0 +1,14 @@
+{
+  "id": 1,
+  "result": {
+    "serverId": "srv1",
+    "name": "studio",
+    "protocolVersion": 1,
+    "version": "0.4.0",
+    "roots": [
+      "/Users/me/projects"
+    ],
+    "deviceId": "dev1",
+    "terminal": true
+  }
+}

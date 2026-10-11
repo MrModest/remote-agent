@@ -11,6 +11,9 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui
     from: 2.4.1
+  SwiftTerm:  # exact: 1.99 is the 2.0 preview, with a different API. Needs Xcode's Metal toolchain.
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.20.0
 # Both client apps build Shared/ plus their own folder. Small differences
 # inside a shared file sit in #if os(iOS) / #if os(macOS). RemoteAgentServer
 # is the Mac menu bar app that runs rad; it shares no code with them.
@@ -25,6 +28,7 @@ targets:
     dependencies:
       - package: RAKit
       - package: MarkdownUI
+      - package: SwiftTerm
     info:
       path: iOS/Info.plist
       properties:
@@ -72,6 +76,7 @@ targets:
     dependencies:
       - package: RAKit
       - package: MarkdownUI
+      - package: SwiftTerm
     info:
       path: macOS/Info.plist
       properties:

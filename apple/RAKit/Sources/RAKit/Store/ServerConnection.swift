@@ -250,6 +250,15 @@ public final class ServerConnection {
         try await ImageCache.shared.namedFile(id) { [client] in try await client.imageData(id) }
     }
 
+    /// The session's shell on the server, for one view to show.
+    public func terminal(sessionID: String) -> TerminalSession {
+        TerminalSession(connection: self, sessionID: sessionID)
+    }
+
+    func terminalTask(_ query: [URLQueryItem]) async throws -> URLSessionWebSocketTask {
+        try await client.terminalTask(query: query)
+    }
+
     public func listDirectory(_ path: String?) async throws -> FSListing {
         try await client.call("fs.list", ["path": path ?? ""])
     }

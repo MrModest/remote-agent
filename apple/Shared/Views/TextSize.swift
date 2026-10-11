@@ -99,7 +99,7 @@ enum FontChoice: Hashable {
         return CTFontGetBoundingRectsForGlyphs(font, .default, &glyph, nil, 1).height
     }
 
-    private func platformFont(size: CGFloat) -> CTFont? {
+    func platformFont(size: CGFloat) -> CTFont? {
         #if os(macOS)
         switch self {
         case .system(let design):

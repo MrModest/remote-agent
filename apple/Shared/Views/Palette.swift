@@ -42,6 +42,24 @@ enum Palette {
     /// A card raised over `base`, such as the Mac's composer: surface0 in
     /// Frappé, and base in Latte, which has nothing lighter. Give it a border.
     static let raised = Color(latte: 0xeff1f5, frappe: 0x414559)
+
+    /// A terminal's colours, as fixed values: a terminal view takes them
+    /// rather than colours that follow the appearance. Catppuccin's own
+    /// terminal themes, on the transcript's background.
+    struct Terminal {
+        var ansi: [UInt32]  // the 16 ANSI colours: black, red, green, yellow, blue, magenta, cyan, white, then bright
+        var background, foreground, cursor, selection: UInt32
+    }
+
+    static func terminal(dark: Bool) -> Terminal {
+        dark
+            ? Terminal(ansi: [0x51576d, 0xe78284, 0xa6d189, 0xe5c890, 0x8caaee, 0xf4b8e4, 0x81c8be, 0xb5bfe2,
+                              0x626880, 0xe78284, 0xa6d189, 0xe5c890, 0x8caaee, 0xf4b8e4, 0x81c8be, 0xa5adce],
+                       background: 0x303446, foreground: 0xc6d0f5, cursor: 0xf2d5cf, selection: 0x626880)
+            : Terminal(ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be,
+                              0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
+                       background: 0xeff1f5, foreground: 0x4c4f69, cursor: 0xdc8a78, selection: 0xacb0be)
+    }
 }
 
 private extension Color {
@@ -60,14 +78,14 @@ private extension Color {
 }
 
 #if os(iOS)
-private extension UIColor {
+extension UIColor {
     convenience init(rgb: UInt32) {
         self.init(red: CGFloat(rgb >> 16 & 0xff) / 255, green: CGFloat(rgb >> 8 & 0xff) / 255,
                   blue: CGFloat(rgb & 0xff) / 255, alpha: 1)
     }
 }
 #else
-private extension NSColor {
+extension NSColor {
     convenience init(rgb: UInt32) {
         self.init(srgbRed: CGFloat(rgb >> 16 & 0xff) / 255, green: CGFloat(rgb >> 8 & 0xff) / 255,
                   blue: CGFloat(rgb & 0xff) / 255, alpha: 1)

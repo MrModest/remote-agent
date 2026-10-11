@@ -13,8 +13,9 @@ import {
   OctagonAlert,
   Square,
   SquareSlash,
+  SquareTerminal,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { contextFraction, modelName, type HarnessInfo, type Item, type Session, type Turn } from "../protocol/models";
 import { Attachments } from "../store/attachments";
 import { useObserved } from "../store/observable";
@@ -26,6 +27,12 @@ import { useDictation } from "./dictation";
 import { AttachButton, AttachmentStrip, imageFiles, useImageDrop } from "./images";
 import { ItemView, TurnFooter, UserBubble } from "./items/ItemView";
 import { ErrorAlert, Menu, Spinner, type MenuEntry } from "./primitives";
+import { useWide } from "./router";
+import { useSettings } from "./settings";
+import { storage } from "../store/storage";
+
+// xterm.js loads with the first terminal opened.
+const TerminalPanel = lazy(() => import("./TerminalPanel"));
 
 export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?: () => void }) {
   const connection = useConnection();
@@ -34,6 +41,8 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
   useObserved(store);
   const [error, setError] = useState<string>();
   const [showDiff, setShowDiff] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const placement = useTerminalPlacement();
   const attachments = useMemo(() => new Attachments(connection), [connection]);
   useObserved(attachments);
 
@@ -91,6 +100,9 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
         }
       : null,
     project?.isGitRepo && { label: "Changes", icon: FileDiff, onSelect: () => setShowDiff(true) },
+    connection.info?.terminal &&
+      session &&
+      !session.archived && { label: showTerminal ? "Hide Terminal" : "Terminal", icon: SquareTerminal, onSelect: () => setShowTerminal(!showTerminal) },
     harness?.commands?.length
       ? {
           section: "Commands",
@@ -122,79 +134,139 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
     store.isRunning && { label: "Force stop agent", icon: OctagonX, destructive: true, onSelect: () => run(() => store.interrupt(true)) },
   ];
 
+  const terminal = showTerminal && session && !session.archived ? placement : undefined;
+  const panel = (style?: React.CSSProperties) =>
+    session && (
+      <Suspense fallback={<div className="terminal" style={style} />}>
+        <TerminalPanel sessionID={session.id} folder={session.workspace.path} onHide={() => setShowTerminal(false)} style={style} />
+      </Suspense>
+    );
+
   return (
-    <div className={"session" + (drop.over ? " dropping" : "")} {...drop.handlers}>
-      <header className="bar session-bar">
-        {onBack && (
-          <button className="icon-button" onClick={onBack} aria-label="Back">
-            <ChevronLeft />
-          </button>
-        )}
-        <div className="session-heading">
-          <h1>{session?.title ?? "Session"}</h1>
-          {session && (
-            <div className="session-subtitle">
-              <HarnessIcon id={session.harness} size={12} />
-              <span>{subtitle(session, harness)}</span>
-              {contextFraction(session.context) !== undefined && (
-                <>
-                  <span>·</span>
-                  <ContextGauge fraction={contextFraction(session.context)!} />
-                </>
+    <div className={"session-frame" + (terminal ? " terminal-" + terminal : "")}>
+      <div className={"session" + (drop.over ? " dropping" : "")} {...drop.handlers}>
+        <header className="bar session-bar">
+          {onBack && (
+            <button className="icon-button" onClick={onBack} aria-label="Back">
+              <ChevronLeft />
+            </button>
+          )}
+          <div className="session-heading">
+            <h1>{session?.title ?? "Session"}</h1>
+            {session && (
+              <div className="session-subtitle">
+                <HarnessIcon id={session.harness} size={12} />
+                <span>{subtitle(session, harness)}</span>
+                {contextFraction(session.context) !== undefined && (
+                  <>
+                    <span>·</span>
+                    <ContextGauge fraction={contextFraction(session.context)!} />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          <Menu label={<Ellipsis />} title="Session" entries={menu} />
+        </header>
+        {/* In place of the messages, they stay underneath, hidden, so they keep their place. */}
+        <div className={"session-main" + (terminal === "over" ? " covered" : "")}>
+          <div className="transcript-scroll" ref={scroller} onScroll={(e) => {
+            const el = e.currentTarget;
+            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }}>
+            <div className="transcript" ref={content}>
+              {!store.synced && (
+                <div className="center pad">
+                  <Spinner size={22} />
+                </div>
+              )}
+              {rows.map((r) =>
+                r.kind === "item" ? (
+                  <ItemView key={r.item.id} item={r.item} store={store} />
+                ) : (
+                  <TurnFooter key={"turn-" + r.turn.id} turn={r.turn} />
+                ),
+              )}
+              {outbox.map(([id, out]) => (
+                <UserBubble key={id} text={out.text} images={out.images} pending />
+              ))}
+              {store.synced && store.transcript.length === 0 && outbox.length === 0 && (
+                <div className="hint center pad">No prompts yet. Write the first one below.</div>
+              )}
+              {session?.status === "running" && (
+                <div className="working">
+                  <Spinner size={14} /> Working…
+                </div>
+              )}
+              {session?.status === "error" && session.error && (
+                <div className="item-error">
+                  <OctagonAlert size={14} /> {session.error}
+                </div>
               )}
             </div>
-          )}
+          </div>
+          <Composer
+            store={store}
+            session={session}
+            attachments={attachments}
+            onSend={() => {
+              pinned.current = true;
+              scrollToEnd();
+            }}
+            onError={setError}
+          />
+          {terminal === "over" && panel()}
         </div>
-        <Menu label={<Ellipsis />} title="Session" entries={menu} />
-      </header>
-      <div className="transcript-scroll" ref={scroller} onScroll={(e) => {
-        const el = e.currentTarget;
-        pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      }}>
-        <div className="transcript" ref={content}>
-          {!store.synced && (
-            <div className="center pad">
-              <Spinner size={22} />
-            </div>
-          )}
-          {rows.map((r) =>
-            r.kind === "item" ? (
-              <ItemView key={r.item.id} item={r.item} store={store} />
-            ) : (
-              <TurnFooter key={"turn-" + r.turn.id} turn={r.turn} />
-            ),
-          )}
-          {outbox.map(([id, out]) => (
-            <UserBubble key={id} text={out.text} images={out.images} pending />
-          ))}
-          {store.synced && store.transcript.length === 0 && outbox.length === 0 && (
-            <div className="hint center pad">No prompts yet. Write the first one below.</div>
-          )}
-          {session?.status === "running" && (
-            <div className="working">
-              <Spinner size={14} /> Working…
-            </div>
-          )}
-          {session?.status === "error" && session.error && (
-            <div className="item-error">
-              <OctagonAlert size={14} /> {session.error}
-            </div>
-          )}
-        </div>
+        {showDiff && <DiffView store={store} canRevert={session?.workspace.kind === "worktree"} onClose={() => setShowDiff(false)} />}
+        <ErrorAlert error={error ?? attachments.error} onClose={() => (error ? setError(undefined) : attachments.clearError())} />
       </div>
-      <Composer
-        store={store}
-        session={session}
-        attachments={attachments}
-        onSend={() => {
-          pinned.current = true;
-          scrollToEnd();
-        }}
-        onError={setError}
-      />
-      {showDiff && <DiffView store={store} canRevert={session?.workspace.kind === "worktree"} onClose={() => setShowDiff(false)} />}
-      <ErrorAlert error={error ?? attachments.error} onClose={() => (error ? setError(undefined) : attachments.clearError())} />
+      {(terminal === "below" || terminal === "right") && <DockedTerminal placement={terminal} panel={panel} />}
     </div>
+  );
+}
+
+/** Where the terminal shows: in a narrow window always in place of the
+ *  messages; a sidebar needs room beside them, or it goes below. */
+function useTerminalPlacement() {
+  const settings = useSettings();
+  const wide = useWide();
+  const roomy = useMedia("(min-width: 1200px)");
+  if (!wide) return "over";
+  return settings.terminalPlacement === "right" && !roomy ? "below" : settings.terminalPlacement;
+}
+
+function useMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const m = matchMedia(query);
+    const l = () => setMatches(m.matches);
+    m.addEventListener("change", l);
+    return () => m.removeEventListener("change", l);
+  }, [query]);
+  return matches;
+}
+
+/** The terminal below the messages or beside them, with a bar to resize it. */
+function DockedTerminal({ placement, panel }: { placement: "below" | "right"; panel: (style: React.CSSProperties) => React.ReactNode }) {
+  const below = placement === "below";
+  const key = below ? "terminalHeight" : "terminalWidth";
+  const [size, setSize] = useState(() => Number(storage.get(key)) || (below ? 280 : 520));
+  const max = (below ? window.innerHeight : window.innerWidth) - (below ? 200 : 360);
+  const shown = Math.max(Math.min(size, max), 120);
+  return (
+    <>
+      <PanelHandle
+        vertical={below}
+        size={shown}
+        min={120}
+        max={max}
+        onChange={(n) => {
+          setSize(n);
+          storage.set(key, String(Math.round(n)));
+        }}
+      />
+      {panel(below ? { height: shown } : { width: shown })}
+    </>
   );
 }
 
@@ -256,6 +328,8 @@ function Composer({
   // ⌘. or Ctrl+. stops the agent, as in the Mac app.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      // In the terminal, Ctrl+. is the shell's.
+      if ((e.target as Element | null)?.closest?.(".terminal")) return;
       if (e.key === "." && (e.metaKey || e.ctrlKey) && store.isRunning) {
         e.preventDefault();
         store.interrupt().catch((err) => onError(err.message));
@@ -344,5 +418,30 @@ function Composer({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The bar between the messages and the terminal: dragging it resizes the
+ *  terminal, which is `size` pixels tall below them or wide beside them. */
+function PanelHandle({ vertical, size, onChange, min, max }: { vertical: boolean; size: number; onChange: (n: number) => void; min: number; max: number }) {
+  return (
+    <div
+      className="panel-handle"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const start = vertical ? e.clientY : e.clientX;
+        const from = size;
+        const move = (m: PointerEvent) => {
+          const d = start - (vertical ? m.clientY : m.clientX);
+          onChange(Math.min(Math.max(from + d, min), max));
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      }}
+    />
   );
 }

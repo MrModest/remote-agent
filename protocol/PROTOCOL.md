@@ -50,6 +50,37 @@ ImageRef { id, mimeType, width?, height?, size }
 // id: SHA-256 of the bytes plus an extension, "<64 hex>.png"; width/height in pixels, absent when unknown (WebP)
 ```
 
+## Terminal
+
+A session's shell runs on the server, in the session's folder (its worktree, for a worktree session), and keeps running when no client is attached. Each session has at most one. It ends when the user exits it or closes it, when the session is archived, or when rad stops. Clients show the menu item only when `server.info` returns `terminal: true`.
+
+- **Socket**: `GET /v1/terminal?session=<id>&cols=<n>&rows=<n>`, a WebSocket with the subprotocol `rad.terminal.v1`.
+  - Auth is the same as for `/v1/ws`: the `Authorization` header, or in a browser the subprotocols `["rad.terminal.v1", "rad.token.<deviceToken>"]`. A missing or revoked token gets `401` before the upgrade. Keepalive and `4001` work the same too.
+  - `cols` and `rows` are the client's size, kept between 2 and 1000; they default to 80×24.
+  - `create=1` starts a shell if the session has none. Only the user's own action sends it, so a reconnect never starts a shell the user would take for the old one.
+  - `id=<shell id>&offset=<n>` resumes: the stream continues from the client's offset, if that shell is still running and the offset is still in its buffer.
+- **Frames**: binary frames carry the terminal's bytes, the shell's output from rad and the user's input from the client. Clients send input in frames of 16 KiB or less. Text frames carry one `TerminalMessage` each.
+- **From rad**:
+  - `attached` comes first. With `reset`, the client clears its screen (a full reset, `CAN ESC c`), and the output that follows starts at `offset`. Without it, the output continues where the client left off.
+  - Output counts towards the stream's offset, byte by byte. A client keeps `offset` from `attached` or `reset` plus the bytes since, and resumes with it.
+  - `reset` comes when the client has fallen behind the buffer: the client clears its screen again, and the output starts again at `offset`.
+  - `exit` comes after the last output, with the shell's `exitCode` (`128 + signal` if a signal ended it). rad then closes the socket.
+  - `error` comes in place of `attached`, and rad closes the socket. Its `code` is `not_found` (no such session), `archived`, `no_dir` (the session's folder is gone), `gone` (no shell, and no `create`), or `unavailable` (rad is shutting down, or the shell didn't start). Clients go by this frame, not the close code.
+- **From the client**: `resize` with `cols` and `rows`, whenever its size changes; with two clients attached, the last one wins. `close` ends the shell for everyone.
+- **Replay**: rad keeps the shell's last 256 KiB of output. A client that starts afresh gets it from the first line break, preceded by the sequences that restore the terminal modes in effect there: the alternate screen, cursor keys and keypad, mouse and focus reports, bracketed paste, autowrap and the cursor's visibility. Then the program in the foreground is told to redraw (`SIGWINCH`).
+- **Environment**: the user's login shell (`-l`), with `TERM=xterm-256color` and `COLORTERM=truecolor`, and without the variables of the terminal rad was started in.
+
+```ts
+TerminalMessage {
+  type: "attached" | "reset" | "exit" | "error"   // from rad
+      | "resize" | "close",                       // from the client
+  id?, offset?, reset?,      // attached; offset also on reset
+  cols?, rows?,              // attached, resize
+  exitCode?,                 // exit
+  code?, message?            // error
+}
+```
+
 ## Frames
 
 | Direction | Shape |
@@ -176,7 +207,7 @@ Approval {
 
 | method | params | result |
 |---|---|---|
-| `server.info` | — | `{serverId, name, protocolVersion, version, roots, deviceId}` |
+| `server.info` | — | `{serverId, name, protocolVersion, version, roots, deviceId, terminal?}` (`terminal`: `GET /v1/terminal` is there) |
 | `device.unpair` | — | `{}` (revokes the calling device's token) |
 | `harness.list` | `{refresh?}` | `{harnesses: [HarnessInfo]}`, only the ones installed on the server |
 | `fs.list` | `{path?}` (omit for roots) | `{path, parent?, entries: [{name, path, isGitRepo}]}` |
@@ -188,7 +219,7 @@ Approval {
 | `session.prompt` | `{commandId, sessionId, text, images?}` | `Item` (the user message; `queued` if a turn is running) |
 | `session.interrupt` | `{sessionId, force?}` | `{}` (`force` kills the agent process) |
 | `session.setMode` | `{sessionId, mode}` | `{}` |
-| `session.archive` | `{sessionId, removeWorktree?}` | `{}` |
+| `session.archive` | `{sessionId, removeWorktree?}` | `{}` (also ends the session's shell) |
 | `approval.respond` | `{commandId, sessionId, approvalId, optionId, message?, answers?}` | `{}` |
 | `subscribe` | `{stream, afterSeq?}` | `{stream, seq}` (see above) |
 | `unsubscribe` | `{stream}` | `{}` |

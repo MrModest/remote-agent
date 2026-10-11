@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"remote-agent/internal/netinfo"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/terminal"
 )
 
 const usage = `rad — remote agent server
@@ -167,6 +169,8 @@ func serve(args []string) error {
 	}
 	srv := api.NewServer(st, hub, orch, fsbrowse.New(cfg.Roots), imgs, serverID, serverName(cfg), log)
 	srv.WebOrigins = cfg.WebOrigins
+	terms := terminal.NewManager(terminal.Options{Log: log})
+	srv.Terminals = terms
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	errc := make(chan error, len(lns))
@@ -202,7 +206,11 @@ func serve(args []string) error {
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(sctx)
-	orch.Shutdown()
+	// Together: the Server app kills rad if it takes much longer.
+	var wg sync.WaitGroup
+	wg.Go(orch.Shutdown)
+	wg.Go(terms.Shutdown)
+	wg.Wait()
 	return nil
 }
 

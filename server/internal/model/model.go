@@ -342,3 +342,17 @@ type HarnessInfo struct {
 	Commands    []Command   `json:"commands,omitempty"` // slash commands the apps offer in a menu
 	Caps        HarnessCaps `json:"caps"`
 }
+
+// TerminalMessage is a text frame on a terminal socket (GET /v1/terminal).
+// The shell's output and the client's input travel as binary frames.
+type TerminalMessage struct {
+	Type     string `json:"type"`               // attached, reset, exit or error from rad; resize or close from a client
+	ID       string `json:"id,omitempty"`       // attached: the shell, for resuming
+	Offset   uint64 `json:"offset,omitempty"`   // attached, reset: the stream offset of the next output byte
+	Reset    bool   `json:"reset,omitempty"`    // attached: the client clears its screen first
+	Cols     int    `json:"cols,omitempty"`     // attached, resize
+	Rows     int    `json:"rows,omitempty"`     // attached, resize
+	ExitCode *int   `json:"exitCode,omitempty"` // exit
+	Code     string `json:"code,omitempty"`     // error: not_found, archived, no_dir, gone or unavailable
+	Message  string `json:"message,omitempty"`  // error
+}

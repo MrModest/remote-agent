@@ -16,7 +16,9 @@ import {
   type FSListing,
   type HarnessInfo,
   type PairResult,
+  type ServerInfo,
   type Session,
+  type TerminalMessage,
 } from "./models";
 
 const dir = join(import.meta.dirname, "../../../protocol/fixtures");
@@ -109,6 +111,21 @@ describe("fixtures", () => {
 
     const p: PairResult = load("http_pair_response.json");
     expect(p.token).toBe("0123abcd");
+
+    const info: ServerInfo = load("response_server_info.json").result;
+    expect(info.terminal).toBe(true);
+    expect(info.deviceId).toBe("dev1");
+  });
+
+  it("terminal messages", () => {
+    const a: TerminalMessage = load("terminal_attached.json");
+    expect(a).toMatchObject({ type: "attached", reset: true, offset: 262130, cols: 80, rows: 24 });
+    expect(a.id).toBeTruthy();
+    // What a client sends matches the server's fixture.
+    const sent: TerminalMessage = { type: "resize", cols: 120, rows: 40 };
+    expect(load("terminal_resize.json")).toEqual(sent);
+    expect((load("terminal_exit.json") as TerminalMessage).exitCode).toBe(129);
+    expect(load("terminal_error.json")).toMatchObject({ type: "error", code: "gone" });
   });
 
   it("notifications", () => {

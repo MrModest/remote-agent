@@ -224,6 +224,22 @@ public actor RPCClient {
         return body
     }
 
+    /// A socket to a session's shell (`GET /v1/terminal`) on the server the
+    /// main socket is connected to.
+    public func terminalTask(query: [URLQueryItem]) throws -> URLSessionWebSocketTask {
+        guard let base = connectedURL else { throw RPCError.disconnected }
+        var comps = URLComponents(url: base.appending(path: "v1/terminal"), resolvingAgainstBaseURL: false)!
+        comps.scheme = base.scheme == "https" ? "wss" : "ws"
+        comps.queryItems = query
+        var req = URLRequest(url: comps.url!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("rad.terminal.v1", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        req.timeoutInterval = 10
+        let t = session.webSocketTask(with: req)
+        t.maximumMessageSize = 4 << 20
+        return t
+    }
+
     /// A request to the server the socket is connected to, with our token.
     private func httpRequest(_ path: String) throws -> URLRequest {
         guard let base = connectedURL else { throw RPCError.disconnected }

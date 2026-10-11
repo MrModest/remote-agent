@@ -199,6 +199,14 @@ export class RPCClient {
     return r.blob();
   }
 
+  /** A socket to `path` on the server the main socket is connected to, with
+   *  our token as a subprotocol beside `protocol`. */
+  openSocket(path: string, protocol: string): WebSocket {
+    const base = this.connectedURL;
+    if (!base) throw RPCError.disconnected();
+    return new WebSocket(base.replace(/^http/, "ws") + path, [protocol, "rad.token." + this.token]);
+  }
+
   /** A request to the server the socket is connected to, with our token. */
   private async http(path: string, init: RequestInit): Promise<Response> {
     const base = this.connectedURL;

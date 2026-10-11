@@ -11,18 +11,29 @@ Notes for coding agents working on this repo. What the project is and how it is 
   - A whole file for one platform goes in its folder. A small difference inside a shared file goes in `#if os(iOS)` / `#if os(macOS)`. `Shared/Views/Platform.swift` holds the shims, such as `inlineTitle()`, `plainTextInput()` and `Platform.deviceName`.
   - A third target, `RemoteAgentServer` in `apple/ServerApp`, is the Mac menu bar app that runs rad. It shares no code with the clients. Its last build phase, `apple/scripts/build-rad.sh`, compiles rad from `server/` into the app and signs it.
 - **Web client:** `web/`, Vite, React and TypeScript, with no UI kit. It mirrors the apps:
-  - `src/protocol` and `src/store` port RAKit: the same sync rules (`synchronized`, gaps, `resync`), stores and outbox. A change to the client logic in RAKit goes into both.
+  - `src/protocol` and `src/store` port RAKit: the same sync rules (`synchronized`, gaps, `resync`), stores and outbox. A change to the client logic in RAKit goes into the web client and `android/core` too.
   - `src/ui` follows `apple/Shared/Views`: the split layout of the iPad and Mac in a wide window, the iPhone's stack in a narrow one. Colours are the palette's, as CSS variables in `src/ui/styles.css`; text sizes and fonts are variables that `src/ui/settings.ts` sets.
   - Browsers can't set headers on a WebSocket, so the client sends its token as the subprotocol `rad.token.<token>`. rad answers browsers only from the origins in its config's `web_origins` (default: localhost).
   - Agent Markdown goes through react-markdown, which doesn't render raw HTML; keep it that way, and keep the CSP in `index.html`, since tokens live in localStorage.
   - `public/icon.png` and `apple-touch-icon.png` are copies of the Mac icon (`AppIcon-Mac-32@2x.png`, `-128@2x.png`); copy them again after rerunning `make-app-icon.swift`.
+- **Android client:** `android/`, a Gradle build (AGP with its built-in Kotlin, a version catalog in `gradle/libs.versions.toml`). minSdk 36, target 37.
+  - `core` is plain Kotlin (no Android), a port of RAKit with the same names: `RpcClient`, `Pairing`, `ServerConnection`, `SessionStore`, `ServerStore`, `TerminalSession`, `ImageCache`. State is `StateFlow`s, changed on the scope the app passes in (the main thread). Its JVM tests read `protocol/fixtures`, and port the Swift and web tests.
+  - One difference from RAKit and web: a `SessionStore` (and the index) counts subscriptions that haven't synchronized yet, and only the last one's `synchronized` makes it live. Otherwise a view subscribing while the connection resubscribes everything gets a second `synchronized` with `reset` after the first replay was applied, and the store empties. Swift and web have the same window.
+  - `app` is Compose: `ui/` follows `apple/Shared/Views` (`SessionView.kt`, `ItemViews.kt`, `NewSessionView.kt`…), `platform/` holds the Android parts (Keystore token store, image coding, dictation). Navigation 3 keys carry the server id; on a wide window `ListDetailSceneStrategy` puts a server's sessions beside the open one.
+  - Colours come from `ui/Palette.kt` (`palette.text`, `palette.mantle`…), not Material's defaults. Interface text takes `Type.*`, which follows the interface size; messages take `messageStyle()` and code `codeStyle()`, which follow the message size and ignore the interface size, as on iOS.
+  - Icons are Material Symbols, written as vector drawables by `android/scripts/symbols.py`; add a name there and rerun it. `ui/Icons.kt` names them, with the SF Symbol each replaces. The launcher icon comes from `apple/scripts/make-app-icon.swift --android ../android/app/src/main/res`.
+  - The terminal is ConnectBot's termlib, pinned exactly; only `ui/TerminalHost.kt` imports it.
+  - Markdown is mikepenz's renderer, wrapped in `ui/AgentMarkdown.kt`, which shows raw HTML as text; keep it that way.
+  - Pickers, the QR scanner and the share sheet are activities of their own, so the app stops while they're open and its sockets close. `ServerConnection.uploadImage` waits for the connection to come back.
+  - Cleartext is allowed to any host (`res/xml/network_security_config.xml`): rad is plain http/ws on Tailscale and LAN addresses, which a domain config can't name.
 - **Changing a wire type:** keep these in step:
   - `server/internal/model/model.go`
   - `apple/RAKit/Sources/RAKit/Protocol/Models.swift`
   - `web/src/protocol/models.ts`
+  - `android/core/src/main/kotlin/dev/remoteagent/core/protocol/Models.kt`
   - `protocol/PROTOCOL.md`
 
-  Then regenerate the fixtures with `cd server && go test ./internal/api -update`, and assert the new field in `apple/RAKit/Tests/RAKitTests/FixtureTests.swift` and `web/src/protocol/fixtures.test.ts`. Clients ignore unknown fields, so prefer adding optional fields over changing existing ones.
+  Then regenerate the fixtures with `cd server && go test ./internal/api -update`, and assert the new field in `apple/RAKit/Tests/RAKitTests/FixtureTests.swift`, `web/src/protocol/fixtures.test.ts` and `android/core/src/test/kotlin/dev/remoteagent/core/FixtureTests.kt`. Clients ignore unknown fields, so prefer adding optional fields over changing existing ones.
 - **Images:** users upload with `POST /v1/images`, and prompts carry the ids. Adapters store images from agent output through `OpenOptions.Images` and put the refs on the item. Clients fetch them with `GET /v1/images/<id>`. The bytes never travel over the WebSocket.
   - Agents show image files in replies as Markdown images with their paths. The orchestrator stores those files and rewrites the links to `rad-image:<id>` (`orchestrator/linkedimages.go`), and the apps draw them with `ReplyImageProvider`. The text that tells agents to do this goes to each adapter as `OpenOptions.Instructions`; a new adapter has to pass it on too.
 - **Changing a harness adapter:** never call real agent CLIs from tests. Adapter tests replay recorded transcripts:
@@ -56,7 +67,8 @@ Notes for coding agents working on this repo. What the project is and how it is 
 - **Releases:** `.github/workflows/release.yml` runs on `v*` tags:
   - The Go tests, then rad cross-compiled for linux and darwin, amd64 and arm64, on Ubuntu.
   - `RemoteAgent-macOS` and `RemoteAgentServer` in Release, arm64 only and signed ad hoc, on the `xcode-27` runner. The apps target macOS 27, and the `macos-26` image has only Xcode 26.
-  - The tag sets the version: `MARKETING_VERSION` for the Mac apps, and `api.Version` for rad.
+  - The Android app, on Ubuntu: tests, lint, then `assembleRelease`, signed with the key in the repository's secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`). A tag without them fails; a run by hand builds unsigned. Without `RA_KEYSTORE_FILE` and its passwords in the environment, a local `assembleRelease` makes an unsigned APK. Never commit a keystore.
+  - The tag sets the version: `MARKETING_VERSION` for the Mac apps, `api.Version` for rad, and `-PversionName` for Android, whose `versionCode` is derived from it so that it only grows (`0.3.0-beta.2` → 30002, `0.3.0` → 30099).
 
   When the build changes (for example `build-rad.sh`, the schemes, or a new deployment target), change the workflow to match. Pushing tags is the developer's job.
   - Each release's notes start with a changelog of what changed for users (new features, changed config or behaviour, fixes they would notice), not internal changes. Push the tag, then create the release with those notes and the asset list from the workflow's `NOTES`: `gh release create <tag> --verify-tag --notes-file …`. The workflow then uploads its assets to that release instead of creating one.
@@ -65,7 +77,7 @@ Notes for coding agents working on this repo. What the project is and how it is 
   - The Server app runs its bundled rad with `update --check --json` and `update --to <dir>`. It keeps downloads in `~/Library/Application Support/Remote Agent Server/`, or `$RAD_HOME/Remote Agent Server/` when `RAD_HOME` is set. `RadBinary.choose()` picks the binary on each start.
   - The release asset names (`rad-<os>-<arch>.tar.gz`, `SHA256SUMS`) are what the updater looks for, so change both together.
   - Tests use httptest, never GitHub. Don't run `rad update` on the developer's rad, its service, or agents-base unless asked. A scratch binary built with `-ldflags "-X remote-agent/internal/api.Version=0.1.2"`, or `--to` a scratch folder, is safe.
-- **Commits:** tests green first. Don't commit `server/bin/`, `apple/build/`, the `.xcodeproj`, `apple/Local.xcconfig`, `web/node_modules` or `web/dist`.
+- **Commits:** tests green first. Don't commit `server/bin/`, `apple/build/`, the `.xcodeproj`, `apple/Local.xcconfig`, `web/node_modules`, `web/dist`, Android's `build/` folders, `.gradle`, `.kotlin`, `local.properties` or a keystore.
 
 ## Testing
 
@@ -73,6 +85,7 @@ Notes for coding agents working on this repo. What the project is and how it is 
 cd server && gofmt -l internal cmd && go vet ./... && go test -race ./...
 cd apple/RAKit && swift test
 cd web && npm ci && npm run typecheck && npm test && npm run build
+cd android && ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 cd apple && xcodegen && xcodebuild -project RemoteAgent.xcodeproj -scheme RemoteAgent-iOS \
   -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build -skipPackagePluginValidation build
 cd apple && xcodebuild -project RemoteAgent.xcodeproj -scheme RemoteAgent-macOS \
@@ -154,6 +167,38 @@ xcrun simctl spawn booted log show --last 2m --predicate 'subsystem == "dev.remo
 - **Keychain after signing changes:** setting or changing `DEVELOPMENT_TEAM` changes the keychain access group, so the simulator app loses tokens it saved earlier. Servers then show "Not connected", and the log shows `NSURLErrorDomain -1011` on the WebSocket. Re-pair; the server doesn't need to revoke anything.
 - **Cleanup:** the app may already be paired with the developer's own server. Add your scratch server next to it. When done, remove the scratch server in the app (… → Remove server, which also unpairs it on rad), then stop your scratch rad.
 - **Coverage:** the simulator doesn't cover Tailscale, LAN pairing, the camera or microphone input. Say so when a change depends on them.
+
+## Emulator
+
+Gradle needs the Android SDK and a JDK. Android Studio's will do; tell Gradle where they are if your shell doesn't:
+
+```bash
+export ANDROID_HOME=~/Library/Android/sdk JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+```
+
+Run the emulator read-only, so tests leave the developer's virtual device as it was, and point it at a scratch rad. `adb reverse` makes the emulator's `127.0.0.1:7499` the host's, so the link `rad pair --print-url` prints works unchanged.
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd <name> -read-only -no-snapshot -no-window &
+adb wait-for-device && adb reverse tcp:7499 tcp:7499
+(cd android && ./gradlew :app:installDebug)
+adb shell am start -n dev.remoteagent.app.debug/dev.remoteagent.app.MainActivity
+adb shell "am start -a android.intent.action.VIEW -d '$(RAD_HOME=$SCRATCH/radhome server/bin/rad pair --print-url)' dev.remoteagent.app.debug"
+adb exec-out screencap -p > /tmp/shot.png
+adb logcat -d -s RemoteAgent:D AndroidRuntime:E   # debug builds log sync events under RemoteAgent
+```
+
+- **Quote the link:** `adb shell` hands its command to the device's shell, where the link's `&` would end the command.
+- **Wait for the app** before opening a link at launch; a link that arrives while it starts can be lost.
+- **Driving it:** `android/e2e/lib.sh` has `tap`, `fill`, `wait_for`, `texts` and `shot`, which find views in a `uiautomator dump` by text, content description or test tag (the app shows its test tags as resource ids).
+  - A dialog, menu or full-screen sheet is a window of its own, and the dump shows only the one in front.
+  - Type only once the keyboard is up (`fill` waits): keys sent before it attaches go to the window, where Space presses the focused button, such as a sheet's Cancel.
+  - Turn the animation scales off while driving it.
+- **Smoke test:** `android/e2e/smoke.sh` walks the app through the fake harness's keywords, a worktree session with its changes and revert, the terminal and the dark theme, saving screenshots to `$SCRATCH/shots`. It removes the server at the end, which unpairs it.
+- **Tablet:** `adb shell wm size 2560x1600 && adb shell wm density 320` gives an expanded width; `wm size reset` and `wm density reset` undo it.
+- **Release build:** R8 shrinks it. Try it after adding a library or a class made by reflection: sign `assembleRelease` with a scratch keystore and run the smoke test with `PKG=dev.remoteagent.app`.
+- **Cleanup:** remove the scratch server in the app, `adb reverse --remove-all`, `adb emu kill`, then stop the scratch rad. A read-only emulator forgets the app when it stops, without unpairing; revoke leftover devices on the scratch rad with `rad devices revoke`.
+- **Coverage:** the emulator has no camera or speech models, so scanning a QR code and dictation itself need a phone; the scanner opening and the dictation states and permission prompt can be checked here. Say so when a change depends on them.
 
 ## Mac app
 

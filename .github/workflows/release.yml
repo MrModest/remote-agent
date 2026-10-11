@@ -1,5 +1,6 @@
-# Builds rad for Linux and macOS (arm64 and x86-64), and the Mac apps, Remote
-# Agent and Remote Agent Server, for Apple silicon. Checks that the web client
+# Builds rad for Linux and macOS (arm64 and x86-64), the Mac apps, Remote
+# Agent and Remote Agent Server, for Apple silicon, and the Android app, signed
+# with the key in the repository's secrets. Checks that the web client
 # builds; it isn't published yet. Pushing a tag like v0.2.0 publishes them as that tag's
 # release; running the workflow by hand only keeps them as run artifacts.
 name: Release
@@ -125,9 +126,58 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platforms;android-37.0 build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Test
+        run: ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug
+      - name: Build
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          RA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=$(git describe --tags --always); fi
+          # Users can only update over an APK signed with the same key, so a
+          # release is never built without it. A run by hand may be unsigned.
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export RA_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          elif [[ $GITHUB_REF == refs/tags/v* ]]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 isn't set; see Development in README.md"; exit 1
+          fi
+          ./gradlew :app:assembleRelease -PversionName="$version"
+          mkdir ../dist
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            apk=app/build/outputs/apk/release/app-release.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+            cp "$apk" ../dist/Remote-Agent-Android.apk
+          else
+            cp app/build/outputs/apk/release/app-release-unsigned.apk ../dist/Remote-Agent-Android-unsigned.apk
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: dist/
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [rad, web, mac]
+    needs: [rad, web, mac, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -146,6 +196,7 @@ jobs:
             - **rad** (`rad-<os>-<arch>.tar.gz`): the server for Linux and macOS. Unpack it, put `rad` on your PATH and run `rad serve`. From then on, `rad update` installs new releases.
             - **Remote Agent** (`Remote-Agent-macOS-arm64.zip`): the client app for the Mac.
             - **Remote Agent Server** (`Remote-Agent-Server-macOS-arm64.zip`): the menu bar app that runs rad on a Mac.
+            - **Remote Agent for Android** (`Remote-Agent-Android.apk`): the client app for Android 16 or later. Open it on the phone and allow installing from your browser; later releases install over it.
             - **Web client**: the Docker image `ghcr.io/buldezir/remote-agent-web`, tagged `latest` and with the version, such as `0.2.0`. `web/compose.example.yaml` runs it.
 
             Both Mac apps need macOS 27 on Apple silicon. They are signed ad hoc, not notarized, so macOS blocks their first launch: allow them under System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine` on the app. After each update, macOS asks again for the Server app's permissions and for the client's access to its saved pairing tokens. To update only rad, and keep those permissions, use **Update rad** in the Server app's menu.

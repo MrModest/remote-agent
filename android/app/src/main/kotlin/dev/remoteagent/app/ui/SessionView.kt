@@ -1,0 +1,535 @@
+package dev.remoteagent.app.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import dev.remoteagent.app.platform.Dictation
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.window.core.layout.WindowSizeClass
+import dev.remoteagent.app.platform.AppSettings.Keys
+import dev.remoteagent.app.platform.state
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.remoteagent.app.platform.Platform
+import dev.remoteagent.core.protocol.HarnessInfo
+import dev.remoteagent.core.protocol.Item
+import dev.remoteagent.core.protocol.Session
+import dev.remoteagent.core.protocol.SessionStatus
+import dev.remoteagent.core.protocol.SlashCommand
+import dev.remoteagent.core.protocol.Turn
+import dev.remoteagent.core.protocol.TurnStatus
+import dev.remoteagent.core.protocol.Workspace
+import dev.remoteagent.core.store.ServerConnection
+import dev.remoteagent.core.store.SessionStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+/** The connection the session on screen belongs to, for its images and commands. */
+val LocalConnection = staticCompositionLocalOf<ServerConnection> { error("no ServerConnection") }
+
+/** A session's transcript and composer. Mirrors apple/Shared/Views/SessionView.swift. */
+@Composable
+fun SessionView(connection: ServerConnection, store: SessionStore, onBack: () -> Unit) {
+    CompositionLocalProvider(LocalConnection provides connection) {
+        SessionScreen(connection, store, onBack)
+    }
+}
+
+private sealed interface Row {
+    val key: String
+
+    data class ItemRow(val item: Item) : Row {
+        override val key get() = item.id
+    }
+
+    data class Footer(val turn: Turn) : Row {
+        override val key get() = "turn-" + turn.id
+    }
+}
+
+@Composable
+private fun SessionScreen(connection: ServerConnection, store: SessionStore, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val uiScope = rememberCoroutineScope()
+    val storeSession by store.session.collectAsStateWithLifecycle()
+    val sessions by connection.sessions.collectAsStateWithLifecycle()
+    val harnesses by connection.harnesses.collectAsStateWithLifecycle()
+    val projects by connection.projects.collectAsStateWithLifecycle()
+    val info by connection.info.collectAsStateWithLifecycle()
+    val transcript by store.transcript.collectAsStateWithLifecycle()
+    val children by store.children.collectAsStateWithLifecycle()
+    val turns by store.turns.collectAsStateWithLifecycle()
+    val outbox by store.outbox.collectAsStateWithLifecycle()
+    val synced by store.synced.collectAsStateWithLifecycle()
+
+    val session = storeSession ?: sessions[store.sessionID]
+    val harness = session?.let { s -> harnesses?.firstOrNull { it.id == s.harness } }
+    val project = session?.let { projects[it.projectId] }
+    val running = session?.status == SessionStatus.RUNNING || session?.status == SessionStatus.AWAITING_APPROVAL
+    val archived = session?.archived == true
+
+    var draft by rememberSaveable { mutableStateOf("") }
+    var focused by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    var showDiff by rememberSaveable { mutableStateOf(false) }
+    var showTerminal by rememberSaveable { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val settings = LocalSettings.current
+    val placementSetting by settings.state(Keys.terminalPlacement, TerminalPlacement.OVER.name)
+    val savedHeight by settings.state(Keys.terminalHeight, 280f)
+    var terminalHeight by remember(savedHeight) { mutableFloatStateOf(savedHeight) }
+    // On a phone or in a narrow window always in place of the messages, otherwise where Settings says.
+    val wide = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
+    val placement = if (wide) TerminalPlacement.entries.firstOrNull { it.name == placementSetting } ?: TerminalPlacement.OVER else TerminalPlacement.OVER
+    val attachments = rememberAttachments(connection) { error = it }
+    val dictation = remember { Dictation(context.applicationContext, settings, uiScope) }
+    LaunchedEffect(dictation.error) { dictation.error?.let { error = it; dictation.error = null } }
+    DisposableEffect(dictation) { onDispose { dictation.stop() } }
+
+    // New rows go in at the foot of the reversed list, where the list would keep
+    // its old foot in place and push them out of sight; while the reader is at
+    // the foot, follow them. Scrolling up stops following; back down resumes.
+    var follow by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) }
+            .collect { (scrolling, atFoot) -> if (scrolling) follow = atFoot }
+    }
+    LaunchedEffect(transcript.size, outbox.size, session?.status) {
+        if (follow) listState.scrollToItem(0)
+    }
+
+    // A session opened straight from a restored back stack starts its server too.
+    LaunchedEffect(connection) { connection.start() }
+    DisposableEffect(store) {
+        store.activate()
+        onDispose { store.deactivate() }
+    }
+
+    fun run(block: suspend () -> Unit) {
+        connection.scope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: "The request failed"
+            }
+        }
+    }
+
+    fun toBottom() = uiScope.launch { listState.animateScrollToItem(0) }
+
+    // There is something to send, and its images are on the server.
+    val canSend = (draft.isNotBlank() || !attachments.isEmpty) && attachments.ready && !archived
+
+    // Dictated text is appended to whatever was already typed.
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) error = "Remote Agent needs the microphone to dictate. Allow it in Settings › Apps › Remote Agent › Permissions."
+    }
+    fun startDictation() {
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        val prefix = draft
+        val separator = if (prefix.isEmpty() || prefix.last().isWhitespace()) "" else " "
+        dictation.start(listOfNotNull(project?.name, harness?.name)) { text -> draft = prefix + separator + text }
+    }
+    fun send() {
+        if (!canSend) return
+        val text = draft
+        val images = attachments.refs
+        draft = ""
+        attachments.clear()
+        // Back to the foot of the transcript, which then follows the reply.
+        toBottom()
+        run { store.send(text, images) }
+    }
+
+    // Runs a slash command, as a prompt of its own: the draft stays. While a
+    // turn runs, it waits for it, like a follow-up.
+    fun send(command: SlashCommand) {
+        toBottom()
+        run { store.send(command.prompt) }
+    }
+
+    val rows = remember(transcript, turns) {
+        buildList<Row> {
+            transcript.forEachIndexed { i, item ->
+                add(Row.ItemRow(item))
+                val tid = item.turnId
+                if (tid != null && transcript.getOrNull(i + 1)?.turnId != tid) {
+                    turns[tid]?.takeIf { it.status == TurnStatus.INTERRUPTED || it.status == TurnStatus.FAILED }?.let { add(Row.Footer(it)) }
+                }
+            }
+        }
+    }
+
+    Screen(
+        title = { SessionTitle(session, harness) },
+        onBack = onBack,
+        actions = {
+            Box {
+                IconButton({ menu = true }, Modifier.testTag("session-menu")) { Icon(painterResource(Icons.more), "More") }
+                SessionMenu(
+                    expanded = menu, onDismiss = { menu = false }, session = session, harness = harness,
+                    projectName = project?.name, isGitRepo = project?.isGitRepo == true,
+                    terminal = info?.terminal == true && !archived, showTerminal = showTerminal, running = running,
+                    onMode = { m -> run { store.setMode(m) } },
+                    onChanges = { showDiff = true },
+                    onTerminal = { showTerminal = !showTerminal },
+                    onCommand = ::send,
+                    onCopyPath = { path -> Platform.copy(context, path, "Path") },
+                    onForceStop = { run { store.interrupt(force = true) } },
+                )
+            }
+        },
+    ) { padding ->
+        val terminalShown = showTerminal && session != null
+        val covered = terminalShown && placement == TerminalPlacement.OVER
+        val below = terminalShown && placement == TerminalPlacement.BELOW
+        Row(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+        val maxTerminal = (maxHeight.value - 200f).coerceAtLeast(120f)
+        // Below the session, the column keeps clear of the keyboard as a whole.
+        Column(Modifier.fillMaxSize().then(if (below) Modifier.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)) else Modifier)) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                LazyColumn(
+                    Modifier.fillMaxSize().widthIn(max = Metrics.readableWidth).alpha(if (covered) 0f else 1f).testTag("transcript"),
+                    state = listState,
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(horizontal = Metrics.margin, vertical = Metrics.gap),
+                    verticalArrangement = Arrangement.spacedBy(Metrics.gap, Alignment.Bottom),
+                ) {
+                    // Bottom first: the list grows upwards from the composer.
+                    if (session?.status == SessionStatus.ERROR && session.error != null) {
+                        item(key = "error") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(painterResource(Icons.forceStop), null, Modifier.size(16.dp), tint = palette.red)
+                                Text(session.error ?: "", style = Type.footnote, color = palette.red)
+                            }
+                        }
+                    }
+                    if (session?.status == SessionStatus.RUNNING) {
+                        item(key = "working") {
+                            Row(Modifier.padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(14.dp), color = palette.subtext, strokeWidth = 2.dp)
+                                Text("Working…", style = Type.footnote, color = palette.subtext)
+                            }
+                        }
+                    }
+                    if (synced && transcript.isEmpty() && outbox.isEmpty()) {
+                        item(key = "empty") {
+                            Text(
+                                "No prompts yet. Write the first one below.", style = Type.footnote, color = palette.subtext,
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            )
+                        }
+                    }
+                    items(outbox.entries.reversed(), key = { "out-" + it.key }) { (_, out) ->
+                        UserBubble(out.text, out.images, pending = true)
+                    }
+                    items(rows.asReversed(), key = { it.key }, contentType = { (it as? Row.ItemRow)?.item?.kind ?: "footer" }) { row ->
+                        when (row) {
+                            is Row.ItemRow -> ItemView(row.item, store, children)
+                            is Row.Footer -> TurnFooter(row.turn)
+                        }
+                    }
+                    if (!synced) {
+                        item(key = "loading") {
+                            Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = palette.subtext)
+                            }
+                        }
+                    }
+                }
+                if (covered) {
+                    TerminalPanel(connection, session!!.id, session.workspace.path, hide = { showTerminal = false }, modifier = Modifier.fillMaxSize())
+                }
+            }
+            if (!covered) {
+                Composer(
+                    insets = !below,
+                    dictation = dictation.phase,
+                    onDictate = ::startDictation,
+                    onStopDictation = dictation::stop,
+                    attachments = attachments,
+                    draft = draft, onDraft = { draft = it }, placeholder = when (dictation.phase) {
+                        Dictation.Phase.DOWNLOADING -> "Downloading the speech model…"
+                        Dictation.Phase.STARTING, Dictation.Phase.LISTENING -> "Listening…"
+                        else -> if (running) "Queue a follow-up…" else "Prompt"
+                    },
+                    running = running, enabled = !archived, canSend = canSend,
+                    // The keyboard has its own dictation key.
+                    onFocus = { focused = it; if (it) dictation.stop() }, onSend = ::send, onStop = { run { store.interrupt() } },
+                )
+            }
+            if (below) {
+                val shown = terminalHeight.coerceIn(120f, maxTerminal)
+                PanelResizeHandle(shown, 120f..maxTerminal, onHeight = { terminalHeight = it }, onDone = { settings.put(Keys.terminalHeight, terminalHeight) })
+                TerminalPanel(connection, session!!.id, session.workspace.path, hide = { showTerminal = false }, modifier = Modifier.fillMaxWidth().height(shown.dp), insets = false)
+            }
+        }
+        }
+        if (terminalShown && placement == TerminalPlacement.RIGHT) {
+            VerticalDivider(color = palette.surface1)
+            TerminalPanel(connection, session!!.id, session.workspace.path, hide = { showTerminal = false }, modifier = Modifier.width(440.dp).fillMaxHeight())
+        }
+        }
+    }
+
+    ErrorDialog(error, title = "Error") { error = null }
+    if (showDiff && session != null) {
+        DiffDialog(store, canRevert = session.workspace.kind == Workspace.Kind.WORKTREE, onDismiss = { showDiff = false })
+    }
+}
+
+@Composable
+private fun SessionTitle(session: Session?, harness: HarnessInfo?) {
+    Column {
+        Text(session?.title ?: "", style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold), color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (session != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                HarnessIcon(session.harness, Modifier.size(12.dp))
+                Text(subtitle(session, harness), style = Type.caption2, color = palette.subtext, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                session.context?.fraction?.let {
+                    Text("·", style = Type.caption2, color = palette.subtext)
+                    ContextGauge(it, Type.caption2)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * "Opus 5.5 · high · Ask": the model (the harness until the agent reports
+ * one), its reasoning effort and the permission mode.
+ */
+private fun subtitle(s: Session, harness: HarnessInfo?): String {
+    val mode = s.mode?.takeIf { it.isNotEmpty() }?.let { m -> harness?.modes?.firstOrNull { it.id == m }?.name ?: m }
+    return listOfNotNull(s.modelName(harness) ?: harness?.name ?: s.harness, s.modelInfo?.effort ?: s.effort, mode)
+        .filter { it.isNotEmpty() }.joinToString(" · ")
+}
+
+@Composable
+private fun SessionMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    session: Session?,
+    harness: HarnessInfo?,
+    projectName: String?,
+    isGitRepo: Boolean,
+    terminal: Boolean,
+    showTerminal: Boolean,
+    running: Boolean,
+    onMode: (String) -> Unit,
+    onChanges: () -> Unit,
+    onTerminal: () -> Unit,
+    onCommand: (SlashCommand) -> Unit,
+    onCopyPath: (String) -> Unit,
+    onForceStop: () -> Unit,
+) {
+    DropdownMenu(expanded, onDismiss, containerColor = palette.mantle) {
+        val modes = harness?.modes
+        if (!modes.isNullOrEmpty()) {
+            MenuHeader("Permissions")
+            for (m in modes) {
+                MenuItem(m.name, if (session?.mode == m.id) Icons.check else null) { onDismiss(); onMode(m.id) }
+            }
+            HorizontalDivider(color = palette.surface0)
+        }
+        if (isGitRepo) MenuItem("Changes", Icons.changes) { onDismiss(); onChanges() }
+        if (terminal) MenuItem(if (showTerminal) "Hide Terminal" else "Terminal", Icons.terminal) { onDismiss(); onTerminal() }
+        val commands = harness?.commands
+        if (!commands.isNullOrEmpty()) {
+            HorizontalDivider(color = palette.surface0)
+            MenuHeader("Commands")
+            for (c in commands) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(c.prompt, color = palette.text, fontFamily = FontFamily.Monospace)
+                            c.description?.let { Text(it, style = Type.caption, color = palette.subtext, maxLines = 2) }
+                        }
+                    },
+                    leadingIcon = { Icon(painterResource(c.symbol), null, tint = palette.text) },
+                    enabled = session?.archived != true,
+                    onClick = { onDismiss(); onCommand(c) },
+                )
+            }
+        }
+        if (session != null) {
+            HorizontalDivider(color = palette.surface0)
+            MenuHeader(projectName ?: "")
+            if (isGitRepo) MenuItem(session.workspace.branch ?: "Detached HEAD", Icons.branch, color = palette.subtext, enabled = true) {}
+            if (session.workspace.kind == Workspace.Kind.WORKTREE) MenuItem("Worktree", Icons.folder, color = palette.subtext) {}
+            MenuItem(session.workspace.path, Icons.copy, color = palette.subtext) { onDismiss(); onCopyPath(session.workspace.path) }
+        }
+        if (running) {
+            HorizontalDivider(color = palette.surface0)
+            MenuItem("Force stop agent", Icons.forceStop, color = palette.red) { onDismiss(); onForceStop() }
+        }
+    }
+}
+
+@Composable
+private fun MenuHeader(text: String) {
+    Text(text, style = Type.caption.copy(fontWeight = FontWeight.SemiBold), color = palette.subtext, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+}
+
+@Composable
+private fun Composer(
+    insets: Boolean,
+    dictation: Dictation.Phase,
+    onDictate: () -> Unit,
+    onStopDictation: () -> Unit,
+    attachments: Attachments,
+    draft: String,
+    onDraft: (String) -> Unit,
+    placeholder: String,
+    running: Boolean,
+    enabled: Boolean,
+    canSend: Boolean,
+    onFocus: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxWidth().background(palette.mantle)
+            .then(if (insets) Modifier.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(Modifier.widthIn(max = Metrics.readableWidth).fillMaxWidth().padding(horizontal = Metrics.margin, vertical = 6.dp)) {
+        if (!attachments.isEmpty) AttachmentStrip(attachments, Modifier.padding(bottom = 4.dp))
+        var focusedNow by remember { mutableStateOf(false) }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            AttachMenu(attachments, enabled = enabled)
+            val style = messageStyle().copy(color = palette.text)
+            BasicTextField(
+                value = draft,
+                onValueChange = onDraft,
+                enabled = enabled,
+                textStyle = style,
+                maxLines = 6,
+                cursorBrush = SolidColor(palette.accent),
+                modifier = Modifier.weight(1f)
+                    .background(palette.surface0, RoundedCornerShape(Metrics.Corner.field))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .onFocusChanged { focusedNow = it.isFocused; onFocus(it.isFocused) }
+                    // A hardware keyboard's Return sends; Shift-Return is a new line.
+                    .onPreviewKeyEvent {
+                        if (it.key == Key.Enter && it.type == KeyEventType.KeyDown && !it.isShiftPressed) {
+                            onSend()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    .testTag("composer"),
+                decorationBox = { inner ->
+                    Box {
+                        if (draft.isEmpty()) Text(placeholder, style = style, color = palette.overlay)
+                        inner()
+                    }
+                },
+            )
+            if (running) {
+                IconButton(onStop, Modifier.size(40.dp), colors = IconButtonDefaults.iconButtonColors(contentColor = palette.red)) {
+                    RoundIcon(Icons.stop, palette.red, "Stop")
+                }
+            }
+            // The mic is the main button until the keyboard is up or there is
+            // text to send; while listening, it stops.
+            val nothingToSend = draft.isBlank() && attachments.isEmpty
+            when {
+                dictation != Dictation.Phase.IDLE -> IconButton(onStopDictation, Modifier.size(40.dp).testTag("dictate"), enabled = dictation != Dictation.Phase.FINISHING) {
+                    RoundIcon(Icons.dictating, palette.red, "Stop dictation")
+                }
+                !focusedNow && nothingToSend -> IconButton(onDictate, Modifier.size(40.dp).testTag("dictate"), enabled = enabled) {
+                    RoundIcon(Icons.mic, if (enabled) palette.accent else palette.overlay, "Dictate")
+                }
+                else -> IconButton(onSend, Modifier.size(40.dp).testTag("send"), enabled = canSend) {
+                    RoundIcon(Icons.send, if (canSend) palette.accent else palette.overlay, "Send")
+                }
+            }
+        }
+        }
+    }
+}
+
+/** A symbol on a filled circle, as SF Symbols' *.circle.fill buttons. */
+@Composable
+fun RoundIcon(icon: Int, color: androidx.compose.ui.graphics.Color, label: String) {
+    Box(Modifier.size(Metrics.roundButton).background(color, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+        Icon(painterResource(icon), label, Modifier.size(Metrics.roundButton * 0.62f), tint = palette.onAccent)
+    }
+}

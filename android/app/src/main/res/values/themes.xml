@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws everything; the window's background is the palette's base
+         (Latte), so launching doesn't flash white. -->
+    <style name="Theme.RemoteAgent" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/base</item>
+    </style>
+</resources>

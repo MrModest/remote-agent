@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Catppuccin Frappé base. -->
+    <color name="base">#FF303446</color>
+</resources>

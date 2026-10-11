@@ -1,7 +1,7 @@
 # Remote Agent wire protocol (v1)
 
-This is the contract between `rad` (the Go server on the dev machine) and its clients (the iOS and Mac apps, the web client, `rad debug`).
-Go types in `server/internal/model` and `server/internal/api` are the source of truth. Golden frames in `protocol/fixtures/` are decoded by both the Go and the Swift test suites.
+This is the contract between `rad` (the Go server on the dev machine) and its clients (the iOS and Mac apps, the Android app, the web client, `rad debug`).
+Go types in `server/internal/model` and `server/internal/api` are the source of truth. Golden frames in `protocol/fixtures/` are decoded by the Go, Swift, web and Android test suites.
 
 ## Transport
 
@@ -24,7 +24,7 @@ Go types in `server/internal/model` and `server/internal/api` are the source of 
    `POST <url>/v1/pair {"code": "...", "deviceName": "Sasha's iPhone"}`
 3. A successful response returns `200`:
    `{"serverId", "name", "protocolVersion", "version", "token", "deviceId"}`
-   - The client stores `token` in the Keychain and remembers the URL that worked, plus the others as fallbacks.
+   - The client stores `token` securely (the Keychain; on Android, encrypted with a Keystore key) and remembers the URL that worked, plus the others as fallbacks.
    - The web client takes the same link, pasted, or in its page's fragment as `#pair=<link, URL-encoded>`. `rad pair --web <web client URL>` prints such a link.
 4. Failures:
    - `401 {"code":"unauthorized"}`: the code is wrong or expired.

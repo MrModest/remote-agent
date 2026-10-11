@@ -1,6 +1,6 @@
 # Remote Agent
 
-Drive coding agents running on your computer from your iPhone, iPad, Mac or a browser.
+Drive coding agents running on your computer from your iPhone, iPad, Mac, an Android phone or tablet, or a browser.
 
 - **`rad`**: a Go server that runs on the dev machine. It spawns agent CLIs as child processes, normalizes what they do into one event model, persists it in SQLite, and serves it over a WebSocket.
 - **Remote Agent**: a native SwiftUI app for iPhone, iPad and Mac. You pair it by QR code, or on the Mac by pasting a link. On iPad and Mac, a server's sessions stay in a sidebar next to the one you have open. From the app you can:
@@ -12,6 +12,7 @@ Drive coding agents running on your computer from your iPhone, iPad, Mac or a br
   - answer the agent's questions
   - review per-turn git diffs and revert them
 - **Web client**: the same app for a browser, in `web/` (React and TypeScript). For now you run it from its dev server on your computer; see [Running the web client](#running-the-web-client).
+- **Android app**: the same app, native, for Android 16 or later, in `android/` (Kotlin and Jetpack Compose). On a tablet a server's sessions stay beside the one you have open. See [Installing the app on Android](#installing-the-app-on-android).
 
 <p>
   <img src="docs/screenshots/iphone-sessions.webp" width="19%" alt="A server's sessions, with three waiting under Needs you">
@@ -192,6 +193,25 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 
 On the Mac, ⌘N starts a session and ⌥⌘N opens another window. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The server menu at the foot of the sidebar switches servers. Dictation listens in your preferred languages from System Settings.
 
+## Installing the app on Android
+
+You need a phone or tablet on Android 16 or later.
+
+- **From a release:** download `Remote-Agent-Android.apk` from [Releases](https://github.com/buldezir/remote-agent/releases) on the phone, open it, and allow installing apps from your browser when Android asks. Later releases install over it.
+- **From source:** you need the Android SDK and JDK 17 or later; Android Studio brings both. Connect the phone with USB debugging on (Settings › System › Developer options), then:
+
+  ```bash
+  cd android && ./gradlew :app:installDebug
+  ```
+
+  The debug build is `dev.remoteagent.app.debug`, so it installs next to a release.
+
+Pair it: run `server/bin/rad pair` on the computer (add `--lan` for Wi-Fi), then tap **Pair a server** (or **+**) › **Scan QR code**. Google Play services shows the scanner, so the app needs no camera permission. Without Play services, paste the link instead. A `remoteagent://pair` link opened on the phone also opens the pairing sheet.
+
+- **Addresses:** the app talks plain `http://` to rad at any address `rad pair` prints, not only IPs, `.local` names and `*.ts.net` as on iOS. Prefer Tailscale: on the LAN the traffic isn't encrypted.
+- **Composer:** a hardware keyboard's Return sends and ⇧Return starts a new line. The terminal has a row of keys a phone keyboard lacks: esc, ctrl, tab and the arrows.
+- **Dictation** uses the phone's speech recognizer, on the device where it can, in your keyboard languages.
+
 ## Running the web client
 
 The web client in `web/` does what the apps do, in a browser. It needs Node.js 22 or later. For now it runs from Vite's server on your computer rather than from a host:
@@ -287,7 +307,7 @@ Unknown keys are errors, so a typo stops rad with the line number rather than be
 - A paired device can make agents run arbitrary commands on your machine, and open a shell there, as the user rad runs as. Treat device tokens like SSH keys. Under the Server app, that shell has the permissions you gave the app.
 - rad listens on all interfaces, but every request except pairing needs a device token. To keep it off other networks entirely, set `listen` to loopback and your Tailscale address.
 - Pairing codes are single-use and expire after 10 minutes.
-- Tokens are 256-bit random values. Only their SHA-256 hash is stored, and the phone keeps the token in the Keychain. The web client keeps it in the browser's local storage, for its origin only.
+- Tokens are 256-bit random values. Only their SHA-256 hash is stored, and the phone keeps the token in the Keychain. The Android app keeps it encrypted with a key in the Android Keystore, and leaves it out of backups. The web client keeps it in the browser's local storage, for its origin only.
 - Browsers send the origin of the page making a request. rad answers browsers only from the origins in `web_origins`, so another site you visit can't use rad. The apps aren't browsers and aren't affected.
 - Revoking a device closes its live sockets.
 - The phone can browse and add only folders under `roots`.
@@ -308,7 +328,7 @@ server/                  Go module for rad
   internal/images        images in transcripts, stored by content hash
   internal/api           HTTP pairing and images + WebSocket JSON-RPC
   internal/update        finds, checks and installs rad's GitHub releases
-protocol/                PROTOCOL.md + golden fixtures shared by the Go, Swift and web tests
+protocol/                PROTOCOL.md + golden fixtures shared by the Go, Swift, web and Android tests
 apple/                   XcodeGen project for the iPhone, iPad and Mac apps
   RAKit/                 Swift package: protocol, network client, stores
   Shared/                SwiftUI app code both apps build
@@ -319,6 +339,11 @@ web/                     the web client: Vite, React and TypeScript
   src/store/             connection, session and server stores (ported from RAKit)
   src/ui/                the views
   e2e/smoke.mjs          drives the client in Chromium against a scratch rad
+android/                 Gradle build for the Android app
+  core/                  Kotlin library: protocol, network client, stores (ported from RAKit)
+  app/                   the Compose app; ui/ are the views, platform/ the Android parts
+  e2e/smoke.sh           drives the app on an emulator against a scratch rad
+  scripts/symbols.py     writes the app's icons (Material Symbols) as vector drawables
 ```
 
 ## Development
@@ -328,6 +353,7 @@ cd server && go test ./... -race              # server tests (adapters replay re
 cd server && go test ./internal/api -update   # regenerate protocol/fixtures after changing wire types
 cd apple/RAKit && swift test                  # client protocol and sync tests
 cd web && npm run typecheck && npm test       # web client types, protocol and sync tests
+cd android && ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug   # Android client
 cd apple && xcodegen && xcodebuild -scheme RemoteAgent-iOS -destination 'platform=iOS Simulator,name=iPhone 17' build
 cd apple && xcodebuild -scheme RemoteAgent-macOS -destination 'platform=macOS' build
 cd apple && xcodebuild -scheme RemoteAgentServer -destination 'platform=macOS' build
@@ -344,6 +370,16 @@ To exercise the UI without spending tokens, run `rad serve --fake` and pick **Fa
 
 It also says how many images came with a prompt. `rad debug run --image shot.png "…"` attaches one from the command line.
 
-To release, push a tag such as `v0.2.0`. [`.github/workflows/release.yml`](.github/workflows/release.yml) runs the server tests, builds rad for Linux and macOS and both Mac apps for Apple silicon, and publishes them as that tag's release with a `SHA256SUMS` file. A tag with a hyphen, such as `v0.3.0-beta.1`, becomes a prerelease.
+To release, push a tag such as `v0.2.0`. [`.github/workflows/release.yml`](.github/workflows/release.yml) runs the server tests, builds rad for Linux and macOS, both Mac apps for Apple silicon and the Android app, and publishes them as that tag's release with a `SHA256SUMS` file. A tag with a hyphen, such as `v0.3.0-beta.1`, becomes a prerelease.
+
+The Android APK is signed with a key kept in the repository's secrets. Create it once, outside the repo, and keep a backup: Android installs an update only over an app signed with the same key, so with a new key everyone has to uninstall first.
+
+```bash
+keytool -genkeypair -keystore ~/remote-agent-release.jks -alias remote-agent -keyalg RSA -keysize 4096 -validity 10000
+base64 -i ~/remote-agent-release.jks | gh secret set ANDROID_KEYSTORE_BASE64
+gh secret set ANDROID_KEYSTORE_PASSWORD
+gh secret set ANDROID_KEY_ALIAS      # remote-agent
+gh secret set ANDROID_KEY_PASSWORD
+```
 
 The raw protocol frames for each session are logged to `<data>/logs/<sessionId>.ndjson`.

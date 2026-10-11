@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Device tokens stay on this device (the Keystore key that encrypts them
+     can't leave it anyway). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="tokens.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="tokens.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -2,10 +2,12 @@
 // prompt cut out of it, on the accent colour. iOS rounds the corners itself;
 // the Mac icons are drawn in the macOS shape, with its margin and shadow.
 // --server draws only the Mac sizes, for Remote Agent Server: an accent
-// bubble on graphite, so the two apps are easy to tell apart.
+// bubble on graphite, so the two apps are easy to tell apart. --android
+// draws the Android app's adaptive icon layers into its res folder.
 //
 //   cd apple && swift scripts/make-app-icon.swift Shared/Assets.xcassets/AppIcon.appiconset
 //   cd apple && swift scripts/make-app-icon.swift --server ServerApp/Assets.xcassets/AppIcon.appiconset
+//   cd apple && swift scripts/make-app-icon.swift --android ../android/app/src/main/res
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -145,15 +147,47 @@ func writeMac(server: Bool, in dir: URL) {
     }
 }
 
+/// Android's adaptive icon: layers 108 dp square, of which the launcher shows
+/// the middle 72 dp or less. The iOS icon's square maps onto those 72 dp; the
+/// background is the accent, edge to edge. The monochrome layer is for themed icons.
+func writeAndroid(in res: URL) {
+    let margin = CGFloat(size) * 18 / 108
+    func layer(_ draw: @escaping (CGContext) -> Void) -> CGImage {
+        image(opaque: false) { ctx in
+            ctx.translateBy(x: margin, y: margin)
+            ctx.scaleBy(x: 72.0 / 108, y: 72.0 / 108)
+            draw(ctx)
+        }
+    }
+    let foreground = layer { ctx in
+        ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: color(0.45, 0.08, 0.06, 0.25))
+        drawBubble(ctx, fill: white)
+    }
+    let monochrome = layer { drawBubble($0, fill: white) }
+    let background = image(opaque: true) { fillAccent($0) }
+    for (density, pixels) in [("mdpi", 108), ("hdpi", 162), ("xhdpi", 216), ("xxhdpi", 324), ("xxxhdpi", 432)] {
+        let dir = res.appendingPathComponent("mipmap-\(density)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        write(foreground, "ic_launcher_foreground.png", in: dir, pixels: pixels)
+        write(monochrome, "ic_launcher_monochrome.png", in: dir, pixels: pixels)
+        write(background, "ic_launcher_background.png", in: dir, pixels: pixels)
+    }
+}
+
 let args = CommandLine.arguments.dropFirst()
 let server = args.first == "--server"
-guard args.count == (server ? 2 : 1) else {
-    print("usage: swift make-app-icon.swift [--server] <AppIcon.appiconset>")
+let android = args.first == "--android"
+guard args.count == (server || android ? 2 : 1) else {
+    print("usage: swift make-app-icon.swift [--server | --android] <AppIcon.appiconset | res folder>")
     exit(2)
 }
 let dir = URL(fileURLWithPath: args.last!)
 if server {
     writeMac(server: true, in: dir)
+    exit(0)
+}
+if android {
+    writeAndroid(in: dir)
     exit(0)
 }
 

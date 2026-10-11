@@ -17,4 +17,17 @@ DerivedData/
 /web/dist/
 /web/e2e-shots/
 
+# Android client
+/android/.gradle/
+/android/.kotlin/
+/android/.idea/
+/android/build/
+/android/*/build/
+/android/local.properties
+/android/captures/
+*.iml
+# The release key lives outside the repo (repository secrets in CI).
+*.jks
+*.keystore
+
 .DS_Store

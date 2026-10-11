@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- rad serves plain http and ws: over Tailscale (100.64.0.0/10, *.ts.net,
+     encrypted by WireGuard), on the LAN, or on loopback. A domain-config can't
+     name IP ranges, so cleartext is allowed everywhere, as on the web client. -->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>

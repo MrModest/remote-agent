@@ -59,6 +59,12 @@ type runtime struct {
 	tools    map[string]*model.Item    // tool_use id -> item
 	plan     *model.Item
 
+	// Background tasks by id, until their notification. Those that end while
+	// no turn runs leave a notice for the turn Claude starts to report on them.
+	background map[string]model.BackgroundTask
+	taskTools  map[string]string // task id -> the tool_use id that started it
+	notices    []string
+
 	// Context usage of the main agent: tokens in its last request, and the
 	// window of its model (only reported in result frames).
 	ctxModel  string
@@ -308,8 +314,18 @@ func (r *runtime) onFrame(f frame, raw []byte) {
 			if f.PermissionMode != "" {
 				r.setMode(f.PermissionMode)
 			}
+			r.onInit()
 		case "compact_boundary":
 			r.onCompacted(f)
+		case "background_tasks_changed":
+			r.onBackgroundTasks(f)
+		case "task_started":
+			if r.taskTools == nil {
+				r.taskTools = map[string]string{}
+			}
+			r.taskTools[f.TaskID] = f.ToolUseID
+		case "task_notification":
+			r.onTaskNotification(f)
 		}
 	case "stream_event":
 		r.onStreamEvent(f)
@@ -330,6 +346,76 @@ func (r *runtime) onFrame(f frame, raw []byte) {
 			r.emit(harness.ApprovalCancelled{ID: f.RequestID})
 		}
 	}
+}
+
+// onInit starts each turn. One that no prompt started is Claude's own,
+// reporting on background tasks that ended.
+func (r *runtime) onInit() {
+	r.mu.Lock()
+	own := !r.inTurn
+	if own {
+		r.inTurn, r.interrupting = true, false
+	}
+	r.mu.Unlock()
+	notices := r.notices
+	r.notices = nil
+	if own {
+		r.emit(harness.TurnStarted{Notice: strings.Join(notices, "\n")})
+	}
+}
+
+func (r *runtime) onBackgroundTasks(f frame) {
+	if r.background == nil {
+		r.background = map[string]model.BackgroundTask{}
+	}
+	tasks := []model.BackgroundTask{}
+	for _, t := range f.Tasks {
+		bt := model.BackgroundTask{ID: t.TaskID, Kind: model.BackgroundOther, Description: t.Description}
+		switch {
+		case t.TaskType == "local_bash":
+			bt.Kind = model.BackgroundCommand
+		case strings.Contains(t.TaskType, "agent") || strings.Contains(t.TaskType, "teammate"):
+			bt.Kind = model.BackgroundAgent
+		}
+		if bt.Description == "" {
+			bt.Description = t.SubagentType
+		}
+		// Kept after it ends, until its notification, which may come later.
+		r.background[bt.ID] = bt
+		tasks = append(tasks, bt)
+	}
+	r.emit(harness.BackgroundTasks{Tasks: tasks})
+}
+
+// onTaskNotification notes a background task that ended between turns, for
+// the turn Claude then starts. Within a turn, Claude reads it itself.
+func (r *runtime) onTaskNotification(f frame) {
+	delete(r.taskTools, f.TaskID)
+	t, ok := r.background[f.TaskID]
+	if !ok {
+		return // a command in the foreground
+	}
+	delete(r.background, f.TaskID)
+	r.mu.Lock()
+	inTurn := r.inTurn
+	r.mu.Unlock()
+	if inTurn {
+		return
+	}
+	verb := "ended"
+	switch f.Status {
+	case "completed":
+		verb = "finished"
+	case "failed":
+		verb = "failed"
+	case "stopped", "killed":
+		verb = "was stopped"
+	}
+	n := "Background task " + verb
+	if t.Description != "" {
+		n += ": " + t.Description
+	}
+	r.notices = append(r.notices, n)
 }
 
 // onCompacted marks where Claude summarized the conversation, after /compact
@@ -649,8 +735,12 @@ func (r *runtime) onResult(f frame) {
 	for _, id := range pendingIDs {
 		r.emit(harness.ApprovalCancelled{ID: id})
 	}
-	// Tool calls that never got a result (e.g. after an interrupt) end here.
+	// Tool calls that never got a result (e.g. after an interrupt) end here,
+	// but those of subagents in the background go on.
 	for id, it := range r.tools {
+		if r.inBackground(it) {
+			continue
+		}
 		it.Status = model.ItemFailed
 		r.emit(harness.ItemEvent{Item: snapshot(it)})
 		delete(r.tools, id)
@@ -683,6 +773,19 @@ func (r *runtime) onResult(f frame) {
 		}
 	}
 	r.emit(ev)
+}
+
+// inBackground reports whether a tool call is a background subagent's.
+func (r *runtime) inBackground(it *model.Item) bool {
+	if it.ParentItemID == "" {
+		return false
+	}
+	for id := range r.background {
+		if r.taskTools[id] == it.ParentItemID {
+			return true
+		}
+	}
+	return false
 }
 
 // contextWindow finds the main model's window in a result's per-model usage

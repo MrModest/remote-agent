@@ -62,6 +62,7 @@ object Icons {
     @DrawableRes val radioOff = R.drawable.sym_radio_button_unchecked // circle
     @DrawableRes val reconnect = R.drawable.sym_refresh // arrow.clockwise
     @DrawableRes val expired = R.drawable.sym_schedule // clock
+    @DrawableRes val background = R.drawable.sym_schedule // clock
     @DrawableRes val toolSearch = R.drawable.sym_search // magnifyingglass
     @DrawableRes val settings = R.drawable.sym_settings // gear
     @DrawableRes val share = R.drawable.sym_share // square.and.arrow.up

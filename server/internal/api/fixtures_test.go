@@ -29,6 +29,10 @@ func fixtures() map[string]any {
 		Status:    model.SessionAwaitingApproval, NativeID: "n1", Title: "Fix the tests", CreatedAt: t0, UpdatedAt: t1,
 		Context:   &model.ContextUsage{Used: 52000, Window: 200000},
 		ModelInfo: &model.ModelInfo{ID: "claude-sonnet-5-5", Name: "Sonnet 5.5", Effort: "high"},
+		BackgroundTasks: []model.BackgroundTask{
+			{ID: "b1", Kind: model.BackgroundCommand, Description: "Watch the release run"},
+			{ID: "a1", Kind: model.BackgroundAgent, Description: "Explore the protocol"},
+		},
 	}
 	turn := &model.Turn{ID: "t1", SessionID: "s1", N: 1, Status: model.TurnCompleted, CheckpointBefore: "aaa", CheckpointAfter: "bbb",
 		Usage: &model.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 5, CostUSD: 0.0123}, StartedAt: t0, EndedAt: &t1}

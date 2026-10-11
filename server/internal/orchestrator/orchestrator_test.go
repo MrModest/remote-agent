@@ -706,6 +706,72 @@ func TestForceInterruptRestartsRuntime(t *testing.T) {
 	checkOrder(t, e.items(s.ID), e.turns(s.ID))
 }
 
+func TestBackgroundTask(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, false)
+	s := e.create(CreateSessionParams{Prompt: "background 1s"})
+	e.waitTurn(s.ID, 1)
+	want := []model.BackgroundTask{{ID: "t1-job", Kind: model.BackgroundCommand, Description: "Wait for the fake job"}}
+	if got := e.session(s.ID).BackgroundTasks; !slices.Equal(got, want) {
+		t.Fatalf("background tasks = %v, want %v", got, want)
+	}
+	// Stopping the idle agent would stop its task too.
+	a, err := e.o.actor(bg, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reapIfIdle(0)
+	a.mu.Lock()
+	alive := a.rt != nil
+	a.mu.Unlock()
+	if !alive {
+		t.Fatal("the agent was stopped as idle while its task ran")
+	}
+
+	// When it ends, the agent reports in a turn of its own, after a notice.
+	if turn := e.waitTurn(s.ID, 2); turn.Status != model.TurnCompleted {
+		t.Errorf("turn 2 = %+v", turn)
+	}
+	items := e.items(s.ID)
+	turn2 := e.turns(s.ID)[1]
+	var own []*model.Item
+	for _, it := range items {
+		if it.TurnID == turn2.ID {
+			own = append(own, it)
+		}
+	}
+	if kinds(own) != "notice,assistant_message" {
+		t.Fatalf("turn 2 items = %s", kinds(own))
+	}
+	if own[0].Text != "Background task finished: Wait for the fake job" || own[1].Text != "The fake job finished." {
+		t.Errorf("turn 2 = %q, %q", own[0].Text, own[1].Text)
+	}
+	checkOrder(t, items, e.turns(s.ID))
+	if sess := e.session(s.ID); len(sess.BackgroundTasks) != 0 || sess.Status != model.SessionIdle {
+		t.Errorf("session = %s, background %v", sess.Status, sess.BackgroundTasks)
+	}
+	a.reapIfIdle(0)
+	a.mu.Lock()
+	alive = a.rt != nil
+	a.mu.Unlock()
+	if alive {
+		t.Error("the idle agent was kept after its task ended")
+	}
+
+	// Tasks end with the agent's process.
+	s2 := e.create(CreateSessionParams{Prompt: "background 1m"})
+	e.waitTurn(s2.ID, 1)
+	if len(e.session(s2.ID).BackgroundTasks) != 1 {
+		t.Fatalf("background tasks = %v", e.session(s2.ID).BackgroundTasks)
+	}
+	if err := e.o.Archive(bg, s2.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.session(s2.ID).BackgroundTasks; len(got) != 0 {
+		t.Errorf("background tasks after archiving = %v", got)
+	}
+}
+
 func TestFailedTurn(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, false)
@@ -782,8 +848,10 @@ func TestRecoverAfterCrash(t *testing.T) {
 	queued.TurnID = ""
 	tool.Tool = &model.ToolCall{Name: "Write", Kind: model.ToolEdit}
 	ap.Approval = &model.Approval{ToolItemID: tool.ID, Title: "Write x", Options: []model.ApprovalOption{{ID: "allow", Label: "Allow", Kind: model.OptionAllowOnce}}}
-	// An idle session must not get a restart notice.
-	idle := &model.Session{ID: store.NewID(), ProjectID: e.proj.ID, Harness: "fake", Status: model.SessionIdle, CreatedAt: now}
+	// An idle session must not get a restart notice; its background tasks
+	// ended with the agent.
+	idle := &model.Session{ID: store.NewID(), ProjectID: e.proj.ID, Harness: "fake", Status: model.SessionIdle, CreatedAt: now,
+		BackgroundTasks: []model.BackgroundTask{{ID: "b1", Kind: model.BackgroundCommand, Description: "Watch the build"}}}
 	_, err := e.st.Write(bg, func(w *store.W) error {
 		for _, s := range []*model.Session{sess, idle} {
 			if err := w.PutSession(s); err != nil {
@@ -831,8 +899,8 @@ func TestRecoverAfterCrash(t *testing.T) {
 	if n := items[5]; n.Kind != model.ItemNotice || n.Order != 6 || !strings.Contains(n.Text, "Server restarted") {
 		t.Errorf("notice = %+v", n)
 	}
-	if e.session(idle.ID).Status != model.SessionIdle || len(e.items(idle.ID)) != 0 {
-		t.Error("idle session was touched")
+	if got := e.session(idle.ID); got.Status != model.SessionIdle || len(e.items(idle.ID)) != 0 || len(got.BackgroundTasks) != 0 {
+		t.Errorf("idle session = %s, %d items, background %v", got.Status, len(e.items(idle.ID)), got.BackgroundTasks)
 	}
 
 	// The session works again: the next turn is 2, resuming the native session.
@@ -1022,4 +1090,64 @@ func TestClaudeTranscript(t *testing.T) {
 	if sess := e.session(s.ID); sess.NativeID != "470b4231-674a-4c66-adc6-09afc9506634" || sess.Mode != "default" || sess.Status != model.SessionIdle {
 		t.Errorf("session = %+v", sess)
 	}
+}
+
+func TestClaudeBackgroundTask(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	ws := filepath.Join(root, "claude-rec/ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, env := replaytest.Command(t, "../harness/claude/testdata/background.ndjson", root)
+	e := newEnvAt(t, ws, false, installed{claude.New(config.Command{Command: exe, Env: env})})
+
+	s := e.create(CreateSessionParams{Harness: "claude", Prompt: "Run the shell command `sleep 5 && echo done` with the Bash tool's " +
+		"run_in_background option, then reply with just: started. When it finishes, reply with just: finished."})
+	if turn := e.waitTurn(s.ID, 2); turn.Status != model.TurnCompleted {
+		t.Errorf("turn 2 = %+v", turn)
+	}
+	items := e.items(s.ID)
+	if got := kinds(items); got != "user_message,tool_call,assistant_message,notice,assistant_message" {
+		t.Fatalf("items = %s", got)
+	}
+	turns := e.turns(s.ID)
+	if items[3].TurnID != turns[1].ID || items[3].Text != "Background task finished: Sleep 5 seconds then echo done" || items[4].Text != "finished" {
+		t.Errorf("turn 2 = %q, %q", items[3].Text, items[4].Text)
+	}
+	checkOrder(t, items, turns)
+	if sess := e.session(s.ID); len(sess.BackgroundTasks) != 0 {
+		t.Errorf("background tasks = %v", sess.BackgroundTasks)
+	}
+}
+
+func TestClaudeBackgroundAgent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	ws := filepath.Join(root, "claude-rec/ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, env := replaytest.Command(t, "../harness/claude/testdata/background-agent.ndjson", root)
+	e := newEnvAt(t, ws, false, installed{claude.New(config.Command{Command: exe, Env: env})})
+
+	s := e.create(CreateSessionParams{Harness: "claude", Prompt: "Do exactly this, in order. 1) Use the Agent tool with " +
+		"run_in_background set to true and subagent_type general-purpose, giving it this task: 'Run the shell command `sleep 10 && ls` " +
+		"with the Bash tool, then report the output.' 2) Run the shell command `sleep 6` yourself with the Bash tool (not in the " +
+		"background). 3) Reply with just: started. Later, when the agent reports back, reply with just the file names it listed."})
+	e.waitTurn(s.ID, 2)
+	items, turns := e.items(s.ID), e.turns(s.ID)
+	if got := kinds(items); got != "user_message,tool_call,tool_call,tool_call,assistant_message,assistant_message,notice,assistant_message" {
+		t.Fatalf("items = %s", got)
+	}
+	// The subagent's command outlived turn 1, and finished in its place.
+	sub := items[3]
+	if sub.Tool.Title != "sleep 10 && ls" || sub.Status != model.ItemCompleted || sub.Tool.Output != "alpha.txt" ||
+		sub.TurnID != turns[0].ID || sub.ParentItemID != items[1].ID {
+		t.Errorf("subagent's command = %q %s %q, turn %q, parent %q", sub.Tool.Title, sub.Status, sub.Tool.Output, sub.TurnID, sub.ParentItemID)
+	}
+	if items[6].Text != "Background task finished: List files after short sleep" || items[7].Text != "alpha.txt" {
+		t.Errorf("turn 2 = %q, %q", items[6].Text, items[7].Text)
+	}
+	checkOrder(t, items, turns)
 }

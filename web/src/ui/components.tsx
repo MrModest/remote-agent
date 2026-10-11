@@ -2,6 +2,7 @@ import {
   Braces,
   Circle,
   CircleStop,
+  Clock,
   CodeXml,
   Cpu,
   Diamond,
@@ -18,8 +19,10 @@ import { parseDate, type SessionStatus } from "../protocol/models";
 import type { ConnectionState } from "../store/serverConnection";
 import { Spinner } from "./primitives";
 
-export function StatusIcon({ status }: { status: SessionStatus }) {
+/** `background`: the agent left work running, which shows on an idle session. */
+export function StatusIcon({ status, background = false }: { status: SessionStatus; background?: boolean }) {
   let icon;
+  let title = status.replace("_", " ");
   switch (status) {
     case "running":
       icon = <Spinner size={15} />;
@@ -34,10 +37,15 @@ export function StatusIcon({ status }: { status: SessionStatus }) {
       icon = <CircleStop size={15} className="c-subtext" />;
       break;
     default:
-      icon = <Circle size={15} className="c-overlay" />;
+      if (background) {
+        icon = <Clock size={15} className="c-subtext" />;
+        title = "running in the background";
+      } else {
+        icon = <Circle size={15} className="c-overlay" />;
+      }
   }
   return (
-    <span className="status-icon" title={status.replace("_", " ")}>
+    <span className="status-icon" title={title}>
       {icon}
     </span>
   );

@@ -75,6 +75,7 @@ data class Session(
     val archived: Boolean = false,
     val context: ContextUsage? = null,
     val modelInfo: ModelInfo? = null,
+    val backgroundTasks: List<BackgroundTask> = emptyList(),
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -86,6 +87,20 @@ data class Session(
         modelInfo?.name?.takeIf { it.isNotEmpty() }?.let { return it }
         val id = (modelInfo?.id ?: model)?.takeIf { it.isNotEmpty() } ?: return null
         return harness?.models?.firstOrNull { it.id == id }?.name ?: id
+    }
+}
+
+/**
+ * What the agent left running after its turn (a command it watches, a
+ * subagent), while its process runs.
+ */
+@Serializable
+data class BackgroundTask(val id: String, val kind: Kind, val description: String) {
+    @Serializable(with = Kind.Serializer::class)
+    enum class Kind(override val wire: String) : WireEnum {
+        COMMAND("command"), AGENT("agent"), OTHER("other");
+
+        object Serializer : LenientEnumSerializer<Kind>("BackgroundTask.Kind", entries.toTypedArray(), OTHER)
     }
 }
 

@@ -422,6 +422,20 @@ func RunTurn(t testing.TB, rt harness.Runtime, prompt string, choose func(harnes
 	if err := rt.Prompt(ctx, harness.Input{Text: prompt}); err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
+	return awaitTurn(ctx, t, rt, choose)
+}
+
+// AwaitTurn collects events until a turn ends without prompting, such as a
+// turn the agent starts on its own, answering approvals as RunTurn does.
+func AwaitTurn(t testing.TB, rt harness.Runtime, choose func(harness.ApprovalEvent) string) *Turn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return awaitTurn(ctx, t, rt, choose)
+}
+
+func awaitTurn(ctx context.Context, t testing.TB, rt harness.Runtime, choose func(harness.ApprovalEvent) string) *Turn {
+	t.Helper()
 	res := &Turn{Items: map[string]model.Item{}}
 	for {
 		select {

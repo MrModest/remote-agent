@@ -252,7 +252,7 @@ private fun SessionRowItem(
 @Composable
 fun SessionRow(session: Session, project: Project?, harness: HarnessInfo?, modifier: Modifier = Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 2.dp)) { StatusIcon(session.status) }
+        Box(Modifier.padding(top = 2.dp)) { StatusIcon(session.status, background = session.backgroundTasks.isNotEmpty()) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(session.title, style = Type.body.copy(fontWeight = FontWeight.Medium), color = palette.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             // The time sits on this line, so the title gets the full width.

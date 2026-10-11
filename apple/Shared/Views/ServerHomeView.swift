@@ -217,7 +217,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            StatusIcon(status: session.status)
+            StatusIcon(status: session.status, background: session.backgroundTasks?.isEmpty == false)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title)

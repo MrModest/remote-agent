@@ -37,8 +37,19 @@ export interface Session {
   archived: boolean;
   context?: ContextUsage;
   modelInfo?: ModelInfo;
+  backgroundTasks?: BackgroundTask[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type BackgroundTaskKind = Open<"command" | "agent" | "other">;
+
+/** What the agent left running after its turn (a command it watches, a
+ *  subagent), while its process runs. */
+export interface BackgroundTask {
+  id: string;
+  kind: BackgroundTaskKind;
+  description: string;
 }
 
 /** The model and reasoning effort the agent reported it runs with. */

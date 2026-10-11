@@ -3,10 +3,16 @@ import SwiftUI
 
 struct StatusIcon: View {
     let status: SessionStatus
+    /// The agent has tasks running in the background.
+    var background = false
 
     var body: some View {
         Group {
             switch status {
+            case .idle where background:
+                Image(systemName: "clock")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Running in the background")
             case .running:
                 ProgressView().controlSize(.small)
             case .awaitingApproval:

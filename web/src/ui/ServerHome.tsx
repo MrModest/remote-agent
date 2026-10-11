@@ -138,7 +138,7 @@ function SessionRow({ session, selected, onOpen, onArchive }: { session: Session
   return (
     <div className={"session-row" + (selected ? " selected" : "")}>
       <button className="session-row-main" onClick={onOpen} aria-current={selected ? "page" : undefined}>
-        <StatusIcon status={session.status} />
+        <StatusIcon status={session.status} background={!!session.backgroundTasks?.length} />
         <span className="session-row-text">
           <span className="session-title">{session.title}</span>
           <span className="session-meta">

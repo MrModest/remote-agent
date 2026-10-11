@@ -114,6 +114,9 @@ struct SessionView: View {
                     }
                     .padding(.leading, 4)
                 }
+                if let tasks = session?.backgroundTasks, !tasks.isEmpty {
+                    BackgroundTasksView(tasks: tasks)
+                }
                 if let err = session?.error, session?.status == .error {
                     Label(err, systemImage: "exclamationmark.octagon")
                         .scaledFont(.footnote)
@@ -557,6 +560,37 @@ private struct ComposerLayout: Layout {
     }
 }
 #endif
+
+/// What the agent left running after its turn, at the foot of the
+/// transcript. The agent reports back when each task ends.
+struct BackgroundTasksView: View {
+    let tasks: [RAKit.BackgroundTask] // not SwiftUI's
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Running in the background")
+                ForEach(tasks) { task in
+                    Label(task.description, systemImage: symbol(task.kind))
+                        .lineLimit(2)
+                }
+            }
+        }
+        .scaledFont(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func symbol(_ kind: RAKit.BackgroundTask.Kind) -> String {
+        switch kind {
+        case .command: "terminal"
+        case .agent: "person.2"
+        case .other: "circle.dotted"
+        }
+    }
+}
 
 /// Marks a turn that did not finish normally.
 struct TurnFooter: View {

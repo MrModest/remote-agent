@@ -108,6 +108,10 @@ describe("fixtures", () => {
     expect(modelName(s, undefined)).toBe("Sonnet 5.5");
     expect(s.modelInfo?.effort).toBe("high");
     expect(s.effort).toBe("high");
+    expect(s.backgroundTasks).toEqual([
+      { id: "b1", kind: "command", description: "Watch the release run" },
+      { id: "a1", kind: "agent", description: "Explore the protocol" },
+    ]);
 
     const p: PairResult = load("http_pair_response.json");
     expect(p.token).toBe("0123abcd");

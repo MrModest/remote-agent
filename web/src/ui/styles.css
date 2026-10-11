@@ -811,6 +811,27 @@ button.form-row:hover:not(:disabled) { background: var(--surface0); }
   color: var(--subtext);
 }
 
+/* The spinner stays by the first line; the tasks go under it. */
+.background-tasks {
+  align-items: flex-start;
+}
+.background-tasks > .spinner {
+  margin-top: 0.15em;
+}
+.background-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.background-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.background-task > svg { margin-top: 0.2em; }
+.background-task > span { overflow-wrap: anywhere; }
+
 /* Items */
 .user-message {
   display: flex;

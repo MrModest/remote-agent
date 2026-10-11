@@ -189,20 +189,14 @@ func (a *actor) startTurn(ctx context.Context, q queuedPrompt) error {
 			return err
 		}
 	}
-	n := a.lastTurnN + 1
-	turn := &model.Turn{ID: store.NewID(), SessionID: a.sess.ID, N: n, Status: model.TurnRunning, StartedAt: time.Now().UTC()}
-	a.o.log.Info("turn started", "session", a.sess.ID, "turn", n, "waited", time.Since(q.queuedAt).Round(time.Millisecond))
-	turn.CheckpointBefore = a.checkpoint(ctx, n, "before")
-	a.refreshBranch(ctx)
-	a.turn, a.lastTurnN = turn, n
-	a.items = map[string]*model.Item{}
+	turn := a.newTurn(ctx)
+	a.o.log.Info("turn started", "session", a.sess.ID, "turn", turn.N, "waited", time.Since(q.queuedAt).Round(time.Millisecond))
 	q.item.TurnID, q.item.Status = turn.ID, model.ItemCompleted
 	if q.item.Order < a.sess.ItemCount {
 		// It waited in the queue: move it below the previous turn's output.
 		a.sess.ItemCount++
 		q.item.Order = a.sess.ItemCount
 	}
-	a.sess.Status, a.sess.Error = model.SessionRunning, ""
 	if err := a.write(ctx, func(w *store.W) error {
 		if err := w.PutTurn(turn); err != nil {
 			return err
@@ -224,6 +218,44 @@ func (a *actor) startTurn(ctx context.Context, q queuedPrompt) error {
 		return err
 	}
 	return nil
+}
+
+// newTurn makes the next turn the current one, with a checkpoint of the
+// files before it, and the session running.
+func (a *actor) newTurn(ctx context.Context) *model.Turn {
+	n := a.lastTurnN + 1
+	turn := &model.Turn{ID: store.NewID(), SessionID: a.sess.ID, N: n, Status: model.TurnRunning, StartedAt: time.Now().UTC()}
+	turn.CheckpointBefore = a.checkpoint(ctx, n, "before")
+	a.refreshBranch(ctx)
+	a.turn, a.lastTurnN = turn, n
+	a.sess.Status, a.sess.Error = model.SessionRunning, ""
+	return turn
+}
+
+// onTurnStarted records a turn the agent began on its own, with no prompt:
+// its notice, if any, is the turn's first item.
+func (a *actor) onTurnStarted(ctx context.Context, ev harness.TurnStarted) {
+	if a.turn != nil {
+		return
+	}
+	turn := a.newTurn(ctx)
+	a.o.log.Info("turn started", "session", a.sess.ID, "turn", turn.N, "by", "agent")
+	var notice *model.Item
+	if ev.Notice != "" {
+		notice = a.newItem(model.ItemNotice, model.ItemCompleted)
+		notice.Text = ev.Notice
+	}
+	a.write(ctx, func(w *store.W) error {
+		if err := w.PutTurn(turn); err != nil {
+			return err
+		}
+		if notice != nil {
+			if err := a.putItem(w, notice); err != nil {
+				return err
+			}
+		}
+		return a.putSession(w)
+	})
 }
 
 func (a *actor) open(ctx context.Context) error {
@@ -299,6 +331,8 @@ func (a *actor) handle(gen int, ev harness.Event) {
 		a.onApproval(ctx, gen, ev)
 	case harness.ApprovalCancelled:
 		a.onApprovalCancelled(ctx, ev.ID)
+	case harness.TurnStarted:
+		a.onTurnStarted(ctx, ev)
 	case harness.TurnEnded:
 		a.endTurn(ctx, ev)
 	case harness.NativeID:
@@ -324,6 +358,11 @@ func (a *actor) handle(gen int, ev harness.Event) {
 		m := model.ModelInfo{ID: ev.ID, Name: ev.Name, Effort: ev.Effort}
 		if a.sess.ModelInfo == nil || *a.sess.ModelInfo != m {
 			a.sess.ModelInfo = &m
+			a.write(ctx, a.putSession)
+		}
+	case harness.BackgroundTasks:
+		if !slices.Equal(ev.Tasks, a.sess.BackgroundTasks) {
+			a.sess.BackgroundTasks = ev.Tasks
 			a.write(ctx, a.putSession)
 		}
 	case harness.Exited:
@@ -524,12 +563,16 @@ func (a *actor) endTurn(ctx context.Context, ev harness.TurnEnded) {
 		a.timer = nil
 	}
 	var changed []*model.Item
+	carried := map[string]*model.Item{}
 	for id, it := range a.items {
 		switch {
 		case it.Kind == model.ItemApproval && it.Status == model.ItemPending:
 			it.Status = model.ItemCancelled
 			delete(a.approvals, id)
-		case it.Status == model.ItemInProgress || it.Status == model.ItemPending:
+		case open(it) && a.goesOn(it):
+			carried[id] = it
+			continue
+		case open(it):
 			it.Status = model.ItemCompleted
 			if it.Kind == model.ItemToolCall && ev.Status != model.TurnCompleted {
 				it.Status = model.ItemFailed
@@ -565,12 +608,27 @@ func (a *actor) endTurn(ctx context.Context, ev harness.TurnEnded) {
 		}
 		return a.putSession(w)
 	})
-	a.items = map[string]*model.Item{}
+	a.items = carried
 	if len(a.queue) > 0 && a.rt != nil {
 		next := a.queue[0]
 		a.queue = a.queue[1:]
 		a.startTurn(ctx, next)
 	}
+}
+
+func open(it *model.Item) bool {
+	return it.Status == model.ItemInProgress || it.Status == model.ItemPending
+}
+
+// goesOn reports whether an unfinished item outlives its turn: it is a
+// background subagent's, under a tool call that has returned or that an
+// earlier turn made.
+func (a *actor) goesOn(it *model.Item) bool {
+	if it.ParentItemID == "" {
+		return false
+	}
+	parent := a.items[it.ParentItemID]
+	return parent == nil || parent.Status == model.ItemCompleted
 }
 
 func (a *actor) logTurnEnd(t *model.Turn) {
@@ -614,6 +672,7 @@ func (a *actor) failQueue(ctx context.Context) {
 func (a *actor) onExit(ctx context.Context, err error) {
 	a.rt = nil
 	a.rtGen++
+	a.sess.BackgroundTasks = nil // they end with the agent's process
 	if a.turn != nil {
 		msg := ""
 		if err != nil {
@@ -631,7 +690,23 @@ func (a *actor) onExit(ctx context.Context, err error) {
 	} else {
 		a.syncStatus()
 	}
-	a.write(ctx, a.putSession)
+	// What background subagents left unfinished ends with the process.
+	var left []*model.Item
+	for _, it := range a.items {
+		if open(it) {
+			it.Status = model.ItemFailed
+			left = append(left, it)
+		}
+	}
+	a.items = map[string]*model.Item{}
+	a.write(ctx, func(w *store.W) error {
+		for _, it := range left {
+			if err := a.putItem(w, it); err != nil {
+				return err
+			}
+		}
+		return a.putSession(w)
+	})
 }
 
 // detach takes the runtime away from the actor, finalizing state as if it
@@ -657,7 +732,9 @@ func (a *actor) detachLocked(reason string) harness.Runtime {
 func (a *actor) reapIfIdle(timeout time.Duration) {
 	a.mu.Lock()
 	var rt harness.Runtime
-	if a.rt != nil && a.turn == nil && len(a.approvals) == 0 && time.Since(a.lastActive) > timeout {
+	// Stopping the agent would stop its background tasks too, and it reports
+	// on them when they end.
+	if a.rt != nil && a.turn == nil && len(a.approvals) == 0 && len(a.sess.BackgroundTasks) == 0 && time.Since(a.lastActive) > timeout {
 		rt = a.detachLocked("idle")
 	}
 	a.mu.Unlock()

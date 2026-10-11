@@ -305,6 +305,19 @@ type frame struct {
 	Model          string `json:"model"`
 	PermissionMode string `json:"permissionMode"`
 
+	// system/background_tasks_changed
+	Tasks []struct {
+		TaskID       string `json:"task_id"`
+		TaskType     string `json:"task_type"`
+		Description  string `json:"description"`
+		SubagentType string `json:"subagent_type"`
+	} `json:"tasks"`
+
+	// system/task_started and task_notification
+	TaskID    string `json:"task_id"`
+	ToolUseID string `json:"tool_use_id"`
+	Status    string `json:"status"`
+
 	// system/compact_boundary
 	UUID            string `json:"uuid"`
 	CompactMetadata *struct {

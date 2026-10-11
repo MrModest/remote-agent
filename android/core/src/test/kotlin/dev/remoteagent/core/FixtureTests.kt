@@ -4,6 +4,7 @@ import dev.remoteagent.core.net.PairResult
 import dev.remoteagent.core.net.RpcClient
 import dev.remoteagent.core.net.ServerMessage
 import dev.remoteagent.core.protocol.Approval
+import dev.remoteagent.core.protocol.BackgroundTask
 import dev.remoteagent.core.protocol.Diff
 import dev.remoteagent.core.protocol.FSListing
 import dev.remoteagent.core.protocol.FileStat
@@ -128,6 +129,9 @@ class FixtureTests {
         assertEquals("Sonnet 5.5", s.modelName(null))
         assertEquals("high", s.modelInfo?.effort)
         assertEquals("high", s.effort)
+        assertEquals(listOf("b1", "a1"), s.backgroundTasks.map { it.id })
+        assertEquals(listOf(BackgroundTask.Kind.COMMAND, BackgroundTask.Kind.AGENT), s.backgroundTasks.map { it.kind })
+        assertEquals(listOf("Watch the release run", "Explore the protocol"), s.backgroundTasks.map { it.description })
 
         val p = WireCoding.json.decodeFromString(PairResult.serializer(), fixture("http_pair_response.json"))
         assertEquals("0123abcd", p.token)
@@ -183,6 +187,8 @@ class FixtureTests {
         assertEquals(ItemKind.UNKNOWN, item.kind)
         assertEquals(dev.remoteagent.core.protocol.ItemStatus.UNKNOWN, item.status)
         assertEquals(dev.remoteagent.core.protocol.ToolKind.OTHER, item.tool?.kind)
+        val task = WireCoding.json.decodeFromString(BackgroundTask.serializer(), """{"id":"t","kind":"cron","description":"d"}""")
+        assertEquals(BackgroundTask.Kind.OTHER, task.kind)
     }
 
 }

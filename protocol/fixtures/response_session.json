@@ -26,6 +26,18 @@
       "name": "Sonnet 5.5",
       "effort": "high"
     },
+    "backgroundTasks": [
+      {
+        "id": "b1",
+        "kind": "command",
+        "description": "Watch the release run"
+      },
+      {
+        "id": "a1",
+        "kind": "agent",
+        "description": "Explore the protocol"
+      }
+    ],
     "createdAt": "2026-10-09T12:00:00Z",
     "updatedAt": "2026-10-09T12:00:05Z"
   }

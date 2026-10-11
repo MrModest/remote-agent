@@ -48,6 +48,23 @@ type ModelInfo struct {
 	Effort string `json:"effort,omitempty"` // e.g. low, medium, high
 }
 
+// BackgroundTask is work the agent left running, such as a command it
+// watches or a subagent. The agent reports back when it ends, in a turn of
+// its own if none is running.
+type BackgroundTask struct {
+	ID          string             `json:"id"`
+	Kind        BackgroundTaskKind `json:"kind"`
+	Description string             `json:"description"`
+}
+
+type BackgroundTaskKind string
+
+const (
+	BackgroundCommand BackgroundTaskKind = "command"
+	BackgroundAgent   BackgroundTaskKind = "agent"
+	BackgroundOther   BackgroundTaskKind = "other"
+)
+
 type SessionStatus string
 
 const (
@@ -73,9 +90,11 @@ type Session struct {
 	Archived  bool          `json:"archived"`
 	Context   *ContextUsage `json:"context,omitempty"`
 	ModelInfo *ModelInfo    `json:"modelInfo,omitempty"`
-	ItemCount int64         `json:"-"`
-	CreatedAt time.Time     `json:"createdAt"`
-	UpdatedAt time.Time     `json:"updatedAt"`
+	// BackgroundTasks lists what the agent left running, while its process runs.
+	BackgroundTasks []BackgroundTask `json:"backgroundTasks,omitempty"`
+	ItemCount       int64            `json:"-"`
+	CreatedAt       time.Time        `json:"createdAt"`
+	UpdatedAt       time.Time        `json:"updatedAt"`
 }
 
 type TurnStatus string

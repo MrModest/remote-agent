@@ -88,6 +88,8 @@ struct FixtureTests {
         #expect(s.result?.modelName(in: nil) == "Sonnet 5.5")
         #expect(s.result?.modelInfo?.effort == "high")
         #expect(s.result?.effort == "high")
+        #expect(s.result?.backgroundTasks?.map(\.kind) == [.command, .agent])
+        #expect(s.result?.backgroundTasks?.first?.description == "Watch the release run")
 
         let p = try dec.decode(PairResult.self, from: load("http_pair_response.json"))
         #expect(p.token == "0123abcd")

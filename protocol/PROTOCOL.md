@@ -160,6 +160,9 @@ Session {
   modelInfo?: { id?, name?, effort? },
                                      // the model and reasoning effort the agent reported it runs with, once it
                                      // has started; name absent: look id up in harness.list models, else show id
+  backgroundTasks?: [{ id, kind: "command"|"agent"|"other", description }],
+                                     // what the agent left running (a command it watches, a subagent), while its
+                                     // process runs; absent: none
   createdAt, updatedAt
 }
 
@@ -197,6 +200,8 @@ Approval {
 ```
 
 **Streaming text.** Assistant text and reasoning stream as repeated `item.upserted` events for the same `id`, each carrying the **full** text so far. Updates are coalesced to at most 10 per second.
+
+**Background tasks.** An agent may leave a command or a subagent running after its turn ends, and report on it later. While one runs, the session lists it in `backgroundTasks`, and rad keeps the agent running even when the session is idle. When a task ends between turns, the agent starts a turn of its own: a turn whose first item is a `notice` ("Background task finished: …") rather than a user message. It runs, queues prompts and stops like any other. A background subagent's items stay in the turn that started them and keep updating after it ends. Claude Code is the only harness that reports background tasks so far.
 
 **Approvals.** A `kind = approval` item with `status = pending` needs an answer. Its status then becomes:
 - `resolved` once answered

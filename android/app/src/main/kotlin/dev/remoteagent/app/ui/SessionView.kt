@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.remoteagent.app.platform.Platform
+import dev.remoteagent.core.protocol.BackgroundTask
 import dev.remoteagent.core.protocol.HarnessInfo
 import dev.remoteagent.core.protocol.Item
 import dev.remoteagent.core.protocol.Session
@@ -176,7 +177,7 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
         snapshotFlow { listState.isScrollInProgress to (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) }
             .collect { (scrolling, atFoot) -> if (scrolling) follow = atFoot }
     }
-    LaunchedEffect(transcript.size, outbox.size, session?.status) {
+    LaunchedEffect(transcript.size, outbox.size, session?.status, session?.backgroundTasks?.size) {
         if (follow) listState.scrollToItem(0)
     }
 
@@ -292,6 +293,10 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
                             }
                         }
                     }
+                    val background = session?.backgroundTasks.orEmpty()
+                    if (background.isNotEmpty()) {
+                        item(key = "background") { BackgroundTasks(background) }
+                    }
                     if (session?.status == SessionStatus.RUNNING) {
                         item(key = "working") {
                             Row(Modifier.padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -363,6 +368,28 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
     ErrorDialog(error, title = "Error") { error = null }
     if (showDiff && session != null) {
         DiffDialog(store, canRevert = session.workspace.kind == Workspace.Kind.WORKTREE, onDismiss = { showDiff = false })
+    }
+}
+
+/** What the agent left running after its turn: it reports back in a turn of its own. */
+@Composable
+private fun BackgroundTasks(tasks: List<BackgroundTask>) {
+    Row(Modifier.padding(start = 4.dp).testTag("background-tasks"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        CircularProgressIndicator(Modifier.padding(top = 2.dp).size(14.dp), color = palette.subtext, strokeWidth = 2.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Running in the background", style = Type.footnote, color = palette.subtext)
+            for (t in tasks) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+                    val icon = when (t.kind) {
+                        BackgroundTask.Kind.COMMAND -> Icons.terminal
+                        BackgroundTask.Kind.AGENT -> Icons.toolThink
+                        BackgroundTask.Kind.OTHER -> Icons.inProgress
+                    }
+                    Icon(painterResource(icon), null, Modifier.padding(top = 2.dp).size(14.dp), tint = palette.subtext)
+                    Text(t.description, style = Type.footnote, color = palette.subtext, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 

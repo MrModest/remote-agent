@@ -41,6 +41,7 @@ public struct Session: Codable, Hashable, Identifiable, Sendable {
     public var archived: Bool
     public var context: ContextUsage?
     public var modelInfo: ModelInfo?
+    public var backgroundTasks: [BackgroundTask]?
     public var createdAt: Date
     public var updatedAt: Date
 }
@@ -52,6 +53,21 @@ extension Session {
         if let name = modelInfo?.name, !name.isEmpty { return name }
         guard let id = modelInfo?.id ?? model, !id.isEmpty else { return nil }
         return harness?.models?.first(where: { $0.id == id })?.name ?? id
+    }
+}
+
+/// Work the agent left running, such as a command it watches or a subagent,
+/// while its process runs. It reports back when the task ends.
+public struct BackgroundTask: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var kind: Kind
+    public var description: String
+
+    public enum Kind: String, Codable, Sendable {
+        case command, agent, other
+        public init(from decoder: Decoder) throws {
+            self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
+        }
     }
 }
 

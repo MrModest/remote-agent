@@ -34,16 +34,23 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
 
-/** Mirrors apple/Shared/Views/Components.swift. */
+/**
+ * Mirrors apple/Shared/Views/Components.swift. [background]: an idle session
+ * whose agent left work running, which shows a clock.
+ */
 @Composable
-fun StatusIcon(status: SessionStatus, size: Dp = 18.dp) {
+fun StatusIcon(status: SessionStatus, size: Dp = 18.dp, background: Boolean = false) {
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         when (status) {
             SessionStatus.RUNNING -> CircularProgressIndicator(Modifier.size(size - 4.dp), color = palette.subtext, strokeWidth = 2.dp)
             SessionStatus.AWAITING_APPROVAL -> Icon(painterResource(Icons.approval), "Needs you", tint = palette.yellow)
             SessionStatus.ERROR -> Icon(painterResource(Icons.warning), "Error", tint = palette.red)
             SessionStatus.STOPPED -> Icon(painterResource(Icons.stopped), "Stopped", tint = palette.subtext)
-            else -> Icon(painterResource(Icons.circle), "Idle", tint = palette.overlay)
+            else -> if (background) {
+                Icon(painterResource(Icons.background), "Running in the background", tint = palette.subtext)
+            } else {
+                Icon(painterResource(Icons.circle), "Idle", tint = palette.overlay)
+            }
         }
     }
 }

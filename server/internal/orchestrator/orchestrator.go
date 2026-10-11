@@ -314,7 +314,8 @@ func (o *Orchestrator) Archive(ctx context.Context, sessionID string, removeWork
 }
 
 // Recover fixes up state left behind by a previous process: running turns are
-// interrupted, pending approvals expire, streaming items are finalized.
+// interrupted, pending approvals expire, streaming items are finalized, and
+// background tasks are gone.
 func (o *Orchestrator) Recover(ctx context.Context) error {
 	sessions, err := o.st.Sessions(ctx)
 	if err != nil {
@@ -360,8 +361,15 @@ func (o *Orchestrator) Recover(ctx context.Context) error {
 		}
 		for _, s := range sessions {
 			if s.Status != model.SessionRunning && s.Status != model.SessionAwaitingApproval {
+				if len(s.BackgroundTasks) > 0 {
+					s.BackgroundTasks = nil // they ended with the agent
+					if err := w.PutSession(s); err != nil {
+						return err
+					}
+				}
 				continue
 			}
+			s.BackgroundTasks = nil
 			turns, err := o.st.Turns(ctx, s.ID)
 			if err != nil {
 				return err

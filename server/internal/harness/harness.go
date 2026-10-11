@@ -94,8 +94,8 @@ func (in Input) Command(name string) (args string, ok bool) {
 }
 
 // Event is emitted by a Runtime. Implementations: ItemEvent, ApprovalEvent,
-// ApprovalCancelled, TurnEnded, NativeID, ModeChanged, ContextUsage,
-// ModelInfo, Exited.
+// ApprovalCancelled, TurnStarted, TurnEnded, NativeID, ModeChanged,
+// ContextUsage, ModelInfo, BackgroundTasks, Exited.
 type Event interface{ isEvent() }
 
 // ItemEvent carries the full current state of a transcript item. Item.ID and
@@ -112,6 +112,11 @@ type ApprovalEvent struct {
 
 // ApprovalCancelled withdraws a pending approval (e.g. the turn was interrupted).
 type ApprovalCancelled struct{ ID string }
+
+// TurnStarted reports a turn the agent began on its own, such as to report
+// on a background task that ended. Turns that Prompt starts don't send it.
+// Notice, if set, says why, for the transcript.
+type TurnStarted struct{ Notice string }
 
 type TurnEnded struct {
 	Status model.TurnStatus
@@ -132,17 +137,23 @@ type ContextUsage struct{ Used, Window int64 }
 // full each time; empty fields are unknown.
 type ModelInfo struct{ ID, Name, Effort string }
 
+// BackgroundTasks lists the tasks the agent runs in the background, in full
+// each time. They end with the process, so it should not be stopped as idle.
+type BackgroundTasks struct{ Tasks []model.BackgroundTask }
+
 // Exited is the last event; the runtime is unusable afterwards.
 type Exited struct{ Err error }
 
 func (ItemEvent) isEvent()         {}
 func (ApprovalEvent) isEvent()     {}
 func (ApprovalCancelled) isEvent() {}
+func (TurnStarted) isEvent()       {}
 func (TurnEnded) isEvent()         {}
 func (NativeID) isEvent()          {}
 func (ModeChanged) isEvent()       {}
 func (ContextUsage) isEvent()      {}
 func (ModelInfo) isEvent()         {}
+func (BackgroundTasks) isEvent()   {}
 func (Exited) isEvent()            {}
 
 type Response struct {
@@ -155,7 +166,8 @@ type Runtime interface {
 	NativeID() string
 	Events() <-chan Event
 	// Prompt starts a turn and returns once the harness accepted it. The turn
-	// finishes with a TurnEnded event. Callers must not overlap turns.
+	// finishes with a TurnEnded event. Callers must not overlap turns,
+	// including those the agent starts itself (TurnStarted).
 	Prompt(ctx context.Context, in Input) error
 	Interrupt(ctx context.Context) error
 	Respond(ctx context.Context, approvalID string, r Response) error

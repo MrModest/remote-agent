@@ -2,6 +2,7 @@ import {
   ArrowUp,
   AudioLines,
   ChevronLeft,
+  CircleDashed,
   Copy,
   Ellipsis,
   FileDiff,
@@ -14,9 +15,10 @@ import {
   Square,
   SquareSlash,
   SquareTerminal,
+  Users,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { contextFraction, modelName, type HarnessInfo, type Item, type Session, type Turn } from "../protocol/models";
+import { contextFraction, modelName, type BackgroundTask, type HarnessInfo, type Item, type Session, type Turn } from "../protocol/models";
 import { Attachments } from "../store/attachments";
 import { useObserved } from "../store/observable";
 import type { SessionStore } from "../store/sessionStore";
@@ -219,6 +221,7 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
                   <Spinner size={14} /> Working…
                 </div>
               )}
+              {!!session?.backgroundTasks?.length && <BackgroundTasks tasks={session.backgroundTasks} />}
               {session?.status === "error" && session.error && (
                 <div className="item-error">
                   <OctagonAlert size={14} /> {session.error}
@@ -243,6 +246,28 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
         <ErrorAlert error={error ?? attachments.error} onClose={() => (error ? setError(undefined) : attachments.clearError())} />
       </div>
       {(terminal === "below" || terminal === "right") && <DockedTerminal placement={terminal} panel={panel} />}
+    </div>
+  );
+}
+
+/** What the agent left running after its turn; it reports back in a turn of
+ *  its own when one ends. */
+function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
+  return (
+    <div className="working background-tasks" role="status" aria-label="Running in the background">
+      <Spinner size={14} />
+      <div className="background-tasks-list">
+        <span>Running in the background</span>
+        {tasks.map((t) => {
+          const Icon = t.kind === "command" ? SquareTerminal : t.kind === "agent" ? Users : CircleDashed;
+          return (
+            <div key={t.id} className="background-task">
+              <Icon size={13} aria-hidden />
+              <span className="clamp2">{t.description}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

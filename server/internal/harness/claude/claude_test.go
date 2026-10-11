@@ -228,6 +228,112 @@ func TestReplayCompact(t *testing.T) {
 	}
 }
 
+func TestReplayBackgroundTask(t *testing.T) {
+	rt, _ := openReplay(t, "testdata/background.ndjson", "claude-rec/ws",
+		harness.OpenOptions{SessionID: "01a12bdb-5f09-7249-b557-4061a96f6959", Mode: "default"})
+	turn := replaytest.RunTurn(t, rt, "Run the shell command `sleep 5 && echo done` with the Bash tool's run_in_background option, "+
+		"then reply with just: started. When it finishes, reply with just: finished.", nil)
+	task := model.BackgroundTask{ID: "b1bf88bbn", Kind: model.BackgroundCommand, Description: "Sleep 5 seconds then echo done"}
+	if got := backgroundLists(turn.Events); !reflect.DeepEqual(got, [][]model.BackgroundTask{{task}}) {
+		t.Errorf("background tasks = %v, want the sleep", got)
+	}
+	if msgs := turn.ItemsOf(model.ItemAssistantMessage); len(msgs) != 1 || msgs[0].Text != "started" {
+		t.Errorf("messages = %v", msgs)
+	}
+
+	// The command ends after the turn, and Claude starts one of its own to say so.
+	own := replaytest.AwaitTurn(t, rt, nil)
+	if got := backgroundLists(own.Events); !reflect.DeepEqual(got, [][]model.BackgroundTask{{}}) {
+		t.Errorf("background tasks = %v, want none left", got)
+	}
+	var started []harness.TurnStarted
+	for _, ev := range own.Events {
+		if s, ok := ev.(harness.TurnStarted); ok {
+			started = append(started, s)
+		}
+	}
+	if want := []harness.TurnStarted{{Notice: "Background task finished: Sleep 5 seconds then echo done"}}; !reflect.DeepEqual(started, want) {
+		t.Errorf("turn started = %v, want %v", started, want)
+	}
+	if msgs := own.ItemsOf(model.ItemAssistantMessage); len(msgs) != 1 || msgs[0].Text != "finished" {
+		t.Errorf("messages = %v", msgs)
+	}
+	if own.End.Status != model.TurnCompleted {
+		t.Errorf("end = %+v", own.End)
+	}
+	replaytest.CloseClean(t, rt)
+}
+
+func TestReplayBackgroundAgent(t *testing.T) {
+	rt, _ := openReplay(t, "testdata/background-agent.ndjson", "claude-rec/ws",
+		harness.OpenOptions{SessionID: "01a12be9-81e8-7f23-86be-12abfcc758ee", Mode: "default"})
+	turn := replaytest.RunTurn(t, rt, "Do exactly this, in order. 1) Use the Agent tool with run_in_background set to true and "+
+		"subagent_type general-purpose, giving it this task: 'Run the shell command `sleep 10 && ls` with the Bash tool, then report "+
+		"the output.' 2) Run the shell command `sleep 6` yourself with the Bash tool (not in the background). 3) Reply with just: "+
+		"started. Later, when the agent reports back, reply with just the file names it listed.", nil)
+	task := model.BackgroundTask{ID: "afcd61f3815bac2ba", Kind: model.BackgroundAgent, Description: "List files after short sleep"}
+	if got := backgroundLists(turn.Events); !reflect.DeepEqual(got, [][]model.BackgroundTask{{task}}) {
+		t.Errorf("background tasks = %v, want the agent", got)
+	}
+	// The turn ends while the subagent's command runs; it goes on.
+	const sub = "toolu_01EJUfKZ7F5Y5kxbhBDCVpGA"
+	if it := turn.Items[sub]; it.Status != model.ItemInProgress || it.ParentItemID != "toolu_01XYnc4cdjaY39GCMtLExTRu" {
+		t.Errorf("subagent's command at the turn's end = %s under %q, want in progress", it.Status, it.ParentItemID)
+	}
+
+	own := replaytest.AwaitTurn(t, rt, nil)
+	if it := own.Items[sub]; it.Status != model.ItemCompleted || it.Tool.Output != "alpha.txt" {
+		t.Errorf("subagent's command = %s %q, want its output", it.Status, it.Tool.Output)
+	}
+	var notices []string
+	for _, ev := range own.Events {
+		if s, ok := ev.(harness.TurnStarted); ok {
+			notices = append(notices, s.Notice)
+		}
+	}
+	if want := []string{"Background task finished: List files after short sleep"}; !slices.Equal(notices, want) {
+		t.Errorf("turn started = %q, want %q", notices, want)
+	}
+	if msgs := own.ItemsOf(model.ItemAssistantMessage); len(msgs) != 2 || msgs[0].ParentItemID == "" || msgs[1].Text != "alpha.txt" {
+		t.Errorf("messages = %v, want the subagent's report, then the reply", msgs)
+	}
+	replaytest.CloseClean(t, rt)
+}
+
+// A background task that ends during a turn is Claude's to read in that
+// turn: no notice, and no turn of its own after it.
+func TestReplayBackgroundTaskEndsMidTurn(t *testing.T) {
+	rt, _ := openReplay(t, "testdata/background-midturn.ndjson", "claude-rec/ws",
+		harness.OpenOptions{SessionID: "01a12beb-06ae-7b85-8709-7aae34c74857", Mode: "default"})
+	first := replaytest.RunTurn(t, rt, "Run the shell command `sleep 8 && echo first` with the Bash tool's run_in_background option, "+
+		"then reply with just: started.", nil)
+	second := replaytest.RunTurn(t, rt, "Run the shell command `sleep 15 && echo second` with the Bash tool in the foreground "+
+		"(not in the background), then reply with just: done.", nil)
+	task := model.BackgroundTask{ID: "bv2dc40k5", Kind: model.BackgroundCommand, Description: "Run delayed echo in background"}
+	if got := backgroundLists(first.Events); !reflect.DeepEqual(got, [][]model.BackgroundTask{{task}}) {
+		t.Errorf("background tasks in turn 1 = %v", got)
+	}
+	if got := backgroundLists(second.Events); !reflect.DeepEqual(got, [][]model.BackgroundTask{{}}) {
+		t.Errorf("background tasks in turn 2 = %v, want none left", got)
+	}
+	rest := replaytest.CloseClean(t, rt)
+	for _, ev := range slices.Concat(first.Events, second.Events, rest) {
+		if s, ok := ev.(harness.TurnStarted); ok {
+			t.Errorf("unexpected turn of Claude's own: %+v", s)
+		}
+	}
+}
+
+func backgroundLists(evs []harness.Event) [][]model.BackgroundTask {
+	var out [][]model.BackgroundTask
+	for _, ev := range evs {
+		if b, ok := ev.(harness.BackgroundTasks); ok {
+			out = append(out, b.Tasks)
+		}
+	}
+	return out
+}
+
 func TestDescribeToolHomePath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

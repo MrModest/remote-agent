@@ -10,6 +10,8 @@
 //	"screenshot" run a tool that returns an image
 //	"picture"  write picture-<turn>.png in the cwd and show it in the reply,
 //	           as a Markdown image with its path, as agents are told to
+//	"background [duration]" leave a task running in the background (5s by
+//	           default), then start a turn of its own to report on it
 //
 // "/compact" stands in for an agent's compaction: a notice, and less context
 // in use.
@@ -28,6 +30,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +60,8 @@ func (Harness) Open(ctx context.Context, o harness.OpenOptions) (harness.Runtime
 	if id == "" {
 		id = "fake-" + o.SessionID
 	}
-	r := &runtime{opts: o, id: id, events: make(chan harness.Event, 256), mode: o.Mode, approvals: map[string]chan harness.Response{}}
+	r := &runtime{opts: o, id: id, events: make(chan harness.Event, 256), mode: o.Mode, approvals: map[string]chan harness.Response{},
+		done: make(chan struct{})}
 	r.events <- harness.NativeID{ID: id}
 	// Like Codex: only an id, which clients name from the harness's model list.
 	effort := o.Effort
@@ -78,6 +82,8 @@ type runtime struct {
 	approvals map[string]chan harness.Response
 	n         int
 	closed    bool
+	done      chan struct{} // closed with the runtime
+	tasks     []model.BackgroundTask
 }
 
 func (r *runtime) NativeID() string             { return r.id }
@@ -218,6 +224,16 @@ func (r *runtime) turn(ctx context.Context, n int, text string, images int) {
 		r.emitItem(tool)
 	}
 
+	if _, after, ok := strings.Cut(text, "background"); ok {
+		d := 5 * time.Second
+		if f := strings.Fields(after); len(f) > 0 {
+			if v, err := time.ParseDuration(f[0]); err == nil {
+				d = v
+			}
+		}
+		r.background(model.BackgroundTask{ID: key("job"), Kind: model.BackgroundCommand, Description: "Wait for the fake job"}, d)
+	}
+
 	if strings.Contains(text, "fail") {
 		end(model.TurnFailed, "fake failure requested")
 		return
@@ -253,6 +269,51 @@ func (r *runtime) turn(ctx context.Context, n int, text string, images int) {
 	msg.Status = model.ItemCompleted
 	r.emit(harness.ItemEvent{Item: msg})
 	end(model.TurnCompleted, "")
+}
+
+// background runs t for d, then, once no turn runs, starts a turn of its own
+// to report on it, as Claude does.
+func (r *runtime) background(t model.BackgroundTask, d time.Duration) {
+	r.mu.Lock()
+	r.tasks = append(r.tasks, t)
+	tasks := slices.Clone(r.tasks)
+	r.mu.Unlock()
+	r.emit(harness.BackgroundTasks{Tasks: tasks})
+	go func() {
+		select {
+		case <-r.done:
+			return
+		case <-time.After(d):
+		}
+		var n int
+		for {
+			r.mu.Lock()
+			r.tasks = slices.DeleteFunc(r.tasks, func(x model.BackgroundTask) bool { return x.ID == t.ID })
+			if r.cancel == nil {
+				r.cancel = func() {} // the report is too short to interrupt
+				r.n++
+				n = r.n
+			}
+			tasks := slices.Clone(r.tasks)
+			r.mu.Unlock()
+			if n > 0 {
+				r.emit(harness.BackgroundTasks{Tasks: tasks})
+				break
+			}
+			select {
+			case <-r.done:
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+		r.emit(harness.TurnStarted{Notice: "Background task finished: " + t.Description})
+		r.emit(harness.ItemEvent{Item: model.Item{ID: fmt.Sprintf("t%d-msg", n), Kind: model.ItemAssistantMessage, Status: model.ItemCompleted,
+			Text: "The fake job finished."}})
+		r.mu.Lock()
+		r.cancel = nil
+		r.mu.Unlock()
+		r.emit(harness.TurnEnded{Status: model.TurnCompleted})
+	}()
 }
 
 // screenshot draws a 640×400 PNG that differs per turn.
@@ -341,6 +402,7 @@ func (r *runtime) Close() error {
 	defer r.mu.Unlock()
 	if !r.closed {
 		r.closed = true
+		close(r.done)
 		r.events <- harness.Exited{}
 		close(r.events)
 	}

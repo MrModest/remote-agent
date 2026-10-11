@@ -78,10 +78,13 @@ export class ServerStore extends Observable {
     return s;
   }
 
-  /** Forgets a server. Also asks the server to revoke this device's token
-   *  (best effort, in the background) so it can't be reused. */
+  /** Forgets a server and the drafts written for it. Also asks the server
+   *  to revoke this device's token (best effort, in the background) so it
+   *  can't be reused. */
   remove(server: SavedServer) {
-    this.connection(server).unpairAndStop();
+    const c = this.connection(server);
+    c.unpairAndStop();
+    c.drafts.removeAll();
     this.connections.delete(server.id);
     storage.remove(tokenKey(server.id));
     this.servers = this.servers.filter((s) => s.id !== server.id);

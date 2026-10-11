@@ -150,7 +150,7 @@ struct ServerSplitView: View {
                 ContentUnavailableView("Session not found", systemImage: "questionmark.bubble",
                                        description: Text("It is no longer on \(server.name)."))
             } else {
-                // A new identity per session, so the draft and the subscription don't carry over.
+                // A new identity per session, so the attachments and the subscription don't carry over.
                 SessionView(connection: connection, store: connection.sessionStore(sessionID))
                     .id(sessionID)
             }

@@ -1,5 +1,6 @@
 import type { Diff, Event, FileStat, ImageRef, Item, Session, Turn } from "../protocol/models";
 import { RPCError } from "../protocol/rpc";
+import type { Drafts } from "./drafts";
 import { Observable } from "./observable";
 
 /** What a session store needs from its connection. */
@@ -9,6 +10,7 @@ export interface SessionHost {
   deactivate(store: SessionStore): void;
   subscribe(store: SessionStore): Promise<void>;
   readonly isConnected: boolean;
+  readonly drafts?: Drafts;
 }
 
 /** A prompt on its way to the server. */
@@ -46,6 +48,17 @@ export class SessionStore extends Observable {
 
   get isActive(): boolean {
     return this.viewers > 0;
+  }
+
+  /** The prompt being written and not sent yet. It outlives the session's
+   *  view, and the page, but stays in this browser. Setting it doesn't
+   *  notify: the composer keeps its own copy as it is typed. */
+  get draft(): string {
+    return this.host?.drafts?.get(this.sessionID) ?? "";
+  }
+
+  set draft(text: string) {
+    this.host?.drafts?.set(this.sessionID, text);
   }
 
   /** Start receiving updates (when a view appears). Updates stop when every

@@ -5,7 +5,11 @@ import dev.remoteagent.core.protocol.Event
 import dev.remoteagent.core.protocol.Item
 import dev.remoteagent.core.protocol.ItemKind
 import dev.remoteagent.core.protocol.ItemStatus
+import dev.remoteagent.core.store.Drafts
+import dev.remoteagent.core.store.ImageCache
 import dev.remoteagent.core.store.Outgoing
+import dev.remoteagent.core.store.SavedServer
+import dev.remoteagent.core.store.ServerConnection
 import dev.remoteagent.core.store.SessionHost
 import dev.remoteagent.core.store.SessionStore
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +167,38 @@ class SessionStoreTests {
 }
 
 /** As PairingTests in StoreTests.swift and web/src/protocol/pairing.test.ts. */
+/** Drafts stay on the device, by server and session. As DraftTests in apple/RAKit/Tests/RAKitTests/StoreTests.swift. */
+class DraftTests {
+    private val storage = MemoryStorage()
+    private val server = SavedServer("srv", "Test", listOf("http://127.0.0.1:1"), "d", Instant.now())
+
+    @Test
+    fun outliveTheStoreAndTheApp() = runTest {
+        fun connection() = ServerConnection(server, "", backgroundScope, ImageCache(null), {}, storage = storage)
+        val c = connection()
+        c.sessionStore("a").draft = "half a thought"
+        assertEquals("", c.sessionStore("b").draft)
+        // The next launch reads it back.
+        assertEquals("half a thought", connection().sessionStore("a").draft)
+        // Sent: forgotten.
+        c.sessionStore("a").draft = ""
+        assertNull(storage["drafts.srv"])
+    }
+
+    @Test
+    fun forgetSessionsGoneFromTheServer() {
+        val d = Drafts(storage, "srv")
+        d["a"] = "kept"
+        d["b"] = "gone"
+        d.keep { it == "a" }
+        val reread = Drafts(storage, "srv")
+        assertEquals("kept", reread["a"])
+        assertEquals("", reread["b"])
+        d.removeAll()
+        assertNull(storage["drafts.srv"])
+    }
+}
+
 class PairingTests {
     @Test
     fun parsesLink() {

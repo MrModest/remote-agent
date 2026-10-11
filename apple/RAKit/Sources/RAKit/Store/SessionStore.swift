@@ -13,6 +13,11 @@ public final class SessionStore {
     public private(set) var synced = false
     /// Optimistic user messages not yet confirmed by the server, keyed by commandId.
     public private(set) var outbox: [String: Outgoing] = [:]
+    /// The prompt being written and not sent yet. It outlives the session's
+    /// view, and the app, but stays on this device.
+    public var draft: String {
+        didSet { connection?.drafts[sessionID] = draft }
+    }
 
     /// A prompt on its way to the server.
     public struct Outgoing: Hashable, Sendable {
@@ -31,6 +36,7 @@ public final class SessionStore {
     init(sessionID: String, connection: ServerConnection?) {
         self.sessionID = sessionID
         self.connection = connection
+        self.draft = connection?.drafts[sessionID] ?? ""
     }
 
     /// Start receiving updates (call from onAppear). Updates stop when every

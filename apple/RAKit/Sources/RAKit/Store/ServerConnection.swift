@@ -25,14 +25,16 @@ public final class ServerConnection {
     private var indexSeq: Int64 = 0
     private var indexLive = false
     @ObservationIgnored private var sessionStores: [String: SessionStore] = [:]
+    @ObservationIgnored let drafts: Drafts
     private var wanted = false
     private var runTask: Task<Void, Never>?
     private var messagesTask: Task<Void, Never>?
     private let onURLWorked: (URL) -> Void
 
-    init(server: SavedServer, token: String, onURLWorked: @escaping (URL) -> Void) {
+    init(server: SavedServer, token: String, defaults: UserDefaults = .standard, onURLWorked: @escaping (URL) -> Void) {
         self.server = server
         self.client = RPCClient(token: token)
+        self.drafts = Drafts(serverID: server.id, defaults: defaults)
         self.onURLWorked = onURLWorked
         messagesTask = Task { [weak self, client] in
             for await msg in client.messages {
@@ -136,6 +138,7 @@ public final class ServerConnection {
                 indexLive = true
                 indexSynced = true
                 for (id, s) in sessions { sessionStores[id]?.session = sessionStores[id]?.session ?? s }
+                drafts.keep { sessions[$0] != nil }
             } else if let s = store(forStream: stream) {
                 s.synchronized(seq: seq, reset: reset)
             }
@@ -177,7 +180,11 @@ public final class ServerConnection {
         case "project.upserted": if let p = ev.project { projects[p.id] = p }
         case "project.removed": if let id = ev.id { projects[id] = nil }
         case "session.upserted": if let s = ev.session { sessions[s.id] = s }
-        case "session.removed": if let id = ev.id { sessions[id] = nil }
+        case "session.removed":
+            if let id = ev.id {
+                sessions[id] = nil
+                drafts[id] = ""
+            }
         default: break
         }
     }

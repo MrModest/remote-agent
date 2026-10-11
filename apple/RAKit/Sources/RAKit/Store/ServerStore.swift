@@ -33,7 +33,7 @@ public final class ServerStore {
 
     public func connection(for server: SavedServer) -> ServerConnection {
         if let c = connections[server.id] { return c }
-        let c = ServerConnection(server: server, token: Keychain.get(server.id) ?? "") { [weak self] url in
+        let c = ServerConnection(server: server, token: Keychain.get(server.id) ?? "", defaults: defaults) { [weak self] url in
             self?.promote(url, for: server.id)
         }
         connections[server.id] = c
@@ -56,10 +56,13 @@ public final class ServerStore {
         return s
     }
 
-    /// Forgets a server. Also asks the server to revoke this device's token
-    /// (best effort, in the background) so it can't be reused.
+    /// Forgets a server and the drafts written for it. Also asks the server
+    /// to revoke this device's token (best effort, in the background) so it
+    /// can't be reused.
     public func remove(_ server: SavedServer) {
-        connection(for: server).unpairAndStop()
+        let c = connection(for: server)
+        c.unpairAndStop()
+        c.drafts.removeAll()
         connections.removeValue(forKey: server.id)
         Keychain.delete(server.id)
         servers.removeAll { $0.id == server.id }

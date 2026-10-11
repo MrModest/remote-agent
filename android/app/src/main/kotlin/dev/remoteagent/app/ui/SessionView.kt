@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -111,6 +112,22 @@ private sealed interface Row {
     }
 }
 
+/** The composer's text. The store keeps each change, for when the session is open again. */
+@Composable
+private fun rememberDraft(store: SessionStore): MutableState<String> = remember(store) {
+    val text = mutableStateOf(store.draft)
+    object : MutableState<String> {
+        override var value: String
+            get() = text.value
+            set(value) {
+                text.value = value
+                store.draft = value
+            }
+        override fun component1() = value
+        override fun component2(): (String) -> Unit = { value = it }
+    }
+}
+
 @Composable
 private fun SessionScreen(connection: ServerConnection, store: SessionStore, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -132,7 +149,7 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
     val running = session?.status == SessionStatus.RUNNING || session?.status == SessionStatus.AWAITING_APPROVAL
     val archived = session?.archived == true
 
-    var draft by rememberSaveable { mutableStateOf("") }
+    var draft by rememberDraft(store)
     var focused by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }

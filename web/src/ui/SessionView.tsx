@@ -328,7 +328,12 @@ function Composer({
   onSend: () => void;
   onError: (e: string) => void;
 }) {
-  const [draft, setDraft] = useState("");
+  // The store keeps the draft for when the session is open again.
+  const [draft, setDraftState] = useState(() => store.draft);
+  const setDraft = (text: string) => {
+    setDraftState(text);
+    store.draft = text;
+  };
   const [focused, setFocused] = useState(false);
   const dictation = useDictation();
   const archived = session?.archived === true;

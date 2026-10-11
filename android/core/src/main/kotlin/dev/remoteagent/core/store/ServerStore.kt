@@ -55,7 +55,7 @@ class ServerStore(
     fun server(id: String): SavedServer? = _servers.value.firstOrNull { it.id == id }
 
     fun connection(server: SavedServer): ServerConnection = connections.getOrPut(server.id) {
-        ServerConnection(server, tokens.get(server.id) ?: "", scope, imageCache, { url -> promote(url, server.id) }, http)
+        ServerConnection(server, tokens.get(server.id) ?: "", scope, imageCache, { url -> promote(url, server.id) }, http, storage)
     }
 
     /** Pairs with a server from a pairing link and saves it. */
@@ -70,11 +70,14 @@ class ServerStore(
     }
 
     /**
-     * Forgets a server. Also asks the server to revoke this device's token
-     * (best effort, in the background) so it can't be reused.
+     * Forgets a server and the drafts written for it. Also asks the server to
+     * revoke this device's token (best effort, in the background) so it can't
+     * be reused.
      */
     fun remove(server: SavedServer) {
-        connection(server).unpairAndStop()
+        val c = connection(server)
+        c.unpairAndStop()
+        c.drafts.removeAll()
         connections.remove(server.id)
         tokens.delete(server.id)
         save(_servers.value.filter { it.id != server.id })

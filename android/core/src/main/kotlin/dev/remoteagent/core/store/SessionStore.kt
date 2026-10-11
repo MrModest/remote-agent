@@ -37,6 +37,8 @@ interface SessionHost {
     fun activate(store: SessionStore)
     fun deactivate(store: SessionStore)
     suspend fun subscribe(store: SessionStore)
+    /** Where sessions' drafts are kept, if anywhere. */
+    val drafts: Drafts? get() = null
 }
 
 /** A prompt on its way to the server. */
@@ -72,6 +74,17 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
     // Views showing the session. Two panes can show the same one.
     private var viewers = 0
     val isActive: Boolean get() = viewers > 0
+
+    /**
+     * The prompt being written and not sent yet. It outlives the session's
+     * screen, and the app, but stays on this device. Setting it doesn't
+     * notify: the composer keeps its own copy as it is typed.
+     */
+    var draft: String
+        get() = host?.drafts?.get(sessionID) ?: ""
+        set(value) {
+            host?.drafts?.set(sessionID, value)
+        }
 
     /**
      * Start receiving updates (when a view appears). Updates stop when every

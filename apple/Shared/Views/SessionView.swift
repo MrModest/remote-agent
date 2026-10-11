@@ -4,7 +4,6 @@ import SwiftUI
 struct SessionView: View {
     let connection: ServerConnection
     @Bindable var store: SessionStore
-    @State private var draft = ""
     @State private var sending = false
     @State private var error: String?
     @State private var showDiff = false
@@ -271,7 +270,7 @@ struct SessionView: View {
     #endif
 
     private var promptField: some View {
-        TextField(text: $draft, prompt: Text(placeholder).foregroundStyle(Palette.overlay), axis: .vertical) {
+        TextField(text: $store.draft, prompt: Text(placeholder).foregroundStyle(Palette.overlay), axis: .vertical) {
             Text(placeholder)
         }
             .textFieldStyle(.plain)
@@ -356,7 +355,7 @@ struct SessionView: View {
     }
 
     private var nothingToSend: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+        store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
     }
 
     /// There is something to send, and its images are on the server.
@@ -369,8 +368,8 @@ struct SessionView: View {
         case .stopDictation:
             dictation.stop()
         case .send:
-            let text = draft, images = attachments.refs
-            draft = ""
+            let text = store.draft, images = attachments.refs
+            store.draft = ""
             attachments.clear()
             // Back to the foot of the transcript, which then follows the reply.
             withAnimation { scrollPosition.scrollTo(edge: .bottom) }
@@ -395,11 +394,11 @@ struct SessionView: View {
 
     /// Dictated text is appended to whatever was already typed.
     private func startDictation() {
-        let prefix = draft
+        let prefix = store.draft
         let separator = prefix.isEmpty || prefix.last?.isWhitespace == true ? "" : " "
         let hints = [project?.name, harness?.name].compactMap { $0 }
         Task {
-            await dictation.start(hints: hints) { text in draft = prefix + separator + text }
+            await dictation.start(hints: hints) { text in store.draft = prefix + separator + text }
         }
     }
 

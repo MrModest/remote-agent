@@ -70,6 +70,50 @@ struct SessionStoreTests {
     }
 }
 
+/// Drafts stay on the device, by server and session.
+@MainActor @Suite(.serialized)
+struct DraftTests {
+    let server = SavedServer(id: "srv", name: "Test", urls: [URL(string: "http://127.0.0.1:1")!], deviceId: "d", addedAt: .now)
+
+    /// Runs `body` with empty defaults, and empties them after. One suite
+    /// for every run, since macOS keeps a file for each.
+    func withDefaults(_ body: (UserDefaults) -> Void) {
+        let suite = "dev.remote-agent.RAKitTests"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        body(defaults)
+    }
+
+    @Test func outliveTheStoreAndTheApp() {
+        withDefaults { defaults in
+            let c = ServerConnection(server: server, token: "", defaults: defaults) { _ in }
+            c.sessionStore("a").draft = "half a thought"
+            #expect(c.sessionStore("b").draft == "")
+            // The next launch reads it back.
+            let next = ServerConnection(server: server, token: "", defaults: defaults) { _ in }
+            #expect(next.sessionStore("a").draft == "half a thought")
+            // Sent: forgotten.
+            c.sessionStore("a").draft = ""
+            #expect(defaults.dictionary(forKey: "drafts.srv") == nil)
+        }
+    }
+
+    @Test func forgetSessionsGoneFromTheServer() {
+        withDefaults { defaults in
+            let d = Drafts(serverID: "srv", defaults: defaults)
+            d["a"] = "kept"
+            d["b"] = "gone"
+            d.keep { $0 == "a" }
+            let reread = Drafts(serverID: "srv", defaults: defaults)
+            #expect(reread["a"] == "kept")
+            #expect(reread["b"] == "")
+            d.removeAll()
+            #expect(defaults.dictionary(forKey: "drafts.srv") == nil)
+        }
+    }
+}
+
 struct PairingTests {
     @Test func parsesLink() throws {
         let l = try #require(PairingLink(string: "remoteagent://pair?v=1&name=studio&code=abc&url=http%3A%2F%2F100.64.1.2%3A7421&url=http%3A%2F%2F127.0.0.1%3A7421"))

@@ -60,6 +60,7 @@ class ServerConnection(
     private val imageCache: ImageCache,
     private val onURLWorked: (String) -> Unit,
     http: OkHttpClient = Http.client,
+    storage: Storage? = null,
 ) : SessionHost {
     private val _server = MutableStateFlow(server)
     val server: StateFlow<SavedServer> = _server.asStateFlow()
@@ -76,6 +77,7 @@ class ServerConnection(
     val harnesses: StateFlow<List<HarnessInfo>?> = _harnesses.asStateFlow()
     private val _indexSynced = MutableStateFlow(false)
     val indexSynced: StateFlow<Boolean> = _indexSynced.asStateFlow()
+    override val drafts = Drafts(storage, server.id)
 
     private val client = RpcClient(token, http)
     private var indexSeq = 0L
@@ -203,6 +205,7 @@ class ServerConnection(
                         val store = sessionStores[id] ?: continue
                         if (store.session.value == null) store.setSession(s)
                     }
+                    drafts.keep { it in sessions }
                 } else {
                     store(msg.stream)?.synchronized(msg.seq, msg.reset)
                 }
@@ -255,7 +258,10 @@ class ServerConnection(
             "project.upserted" -> ev.project?.let { projects[it.id] = it }
             "project.removed" -> ev.id?.let { projects.remove(it) }
             "session.upserted" -> ev.session?.let { sessions[it.id] = it }
-            "session.removed" -> ev.id?.let { sessions.remove(it) }
+            "session.removed" -> ev.id?.let {
+                sessions.remove(it)
+                drafts[it] = ""
+            }
         }
     }
 

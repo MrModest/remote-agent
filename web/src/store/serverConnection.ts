@@ -1,6 +1,7 @@
 import type { Event, FSListing, HarnessInfo, ImageRef, Project, ServerInfo, Session } from "../protocol/models";
 import { parseDate } from "../protocol/models";
 import { RPCClient, RPCError, type ServerMessage } from "../protocol/rpc";
+import { Drafts } from "./drafts";
 import { imageCache } from "./imageCache";
 import { Observable } from "./observable";
 import type { SavedServer } from "./serverStore";
@@ -35,6 +36,7 @@ export class ServerConnection extends Observable implements SessionHost {
   /** The agents installed on the server; undefined until first loaded. */
   harnesses: HarnessInfo[] | undefined;
   indexSynced = false;
+  readonly drafts: Drafts;
 
   private client: RPCClient;
   private indexSeq = 0;
@@ -54,6 +56,7 @@ export class ServerConnection extends Observable implements SessionHost {
     super();
     this.client = new RPCClient(token);
     this.client.onMessage = (m) => this.handle(m);
+    this.drafts = new Drafts(server.id);
   }
 
   get isConnected(): boolean {
@@ -199,6 +202,7 @@ export class ServerConnection extends Observable implements SessionHost {
             const store = this.sessionStores.get(id);
             if (store && !store.session) store.setSession(s);
           }
+          this.drafts.keep((id) => this.sessions.has(id));
           this.changed();
         } else {
           this.storeForStream(msg.stream)?.synchronized(msg.seq, msg.reset);
@@ -253,7 +257,10 @@ export class ServerConnection extends Observable implements SessionHost {
         if (ev.session) this.sessions.set(ev.session.id, ev.session);
         break;
       case "session.removed":
-        if (ev.id) this.sessions.delete(ev.id);
+        if (ev.id) {
+          this.sessions.delete(ev.id);
+          this.drafts.set(ev.id, "");
+        }
         break;
     }
   }

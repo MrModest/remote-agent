@@ -111,7 +111,7 @@ export default function TerminalPanel({ sessionID, folder, onHide, style }: { se
           title="Terminal"
           entries={[{ label: "Close Shell", destructive: true, onSelect: state?.kind === "open" ? () => session?.closeShell() : undefined }]}
         />
-        <button className="icon-button" onClick={onHide} aria-label="Hide Terminal" title="Hide the terminal. The shell keeps running.">
+        <button className="icon-button" onClick={onHide} aria-label="Hide Terminal" title="Hide the terminal (⌘J). The shell keeps running.">
           <X size={16} />
         </button>
       </div>

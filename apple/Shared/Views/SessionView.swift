@@ -44,6 +44,7 @@ struct SessionView: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .background { terminalShortcuts }
         .navigationTitle(session?.title ?? "Session")
         #if os(macOS)
         .navigationSubtitle(session.map(macSubtitle) ?? "")
@@ -160,6 +161,30 @@ struct SessionView: View {
     /// Return and Esc belong to the terminal while it has the keyboard.
     private var terminalHasKeys: Bool {
         showTerminal && (terminalFocused || placement == .over)
+    }
+
+    private var canOpenTerminal: Bool {
+        connection.info?.terminal == true && session?.archived == false
+    }
+
+    /// ⌘J and ⌘` show and hide the terminal. Hiding it gives the keyboard
+    /// back to the prompt.
+    @ViewBuilder private var terminalShortcuts: some View {
+        if canOpenTerminal {
+            let title = showTerminal ? "Hide Terminal" : "Show Terminal"
+            Group {
+                Button(title, action: toggleTerminal).keyboardShortcut("j")
+                Button(title, action: toggleTerminal).keyboardShortcut("`")
+            }
+            // hidden() would turn the shortcuts off.
+            .opacity(0)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func toggleTerminal() {
+        showTerminal.toggle()
+        if !showTerminal { composerFocused = true }
     }
 
     // MARK: Rows
@@ -412,7 +437,7 @@ struct SessionView: View {
                 if project?.isGitRepo == true {
                     Button("Changes", systemImage: "plusminus") { showDiff = true }
                 }
-                if connection.info?.terminal == true, session?.archived == false {
+                if canOpenTerminal {
                     Button(showTerminal ? "Hide Terminal" : "Terminal", systemImage: "apple.terminal") {
                         showTerminal.toggle()
                     }

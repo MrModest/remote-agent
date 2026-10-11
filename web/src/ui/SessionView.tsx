@@ -87,6 +87,29 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
   const outbox = [...store.outbox.entries()].sort(([a], [b]) => a.localeCompare(b));
   const drop = useImageDrop(session?.archived ? undefined : attachments);
 
+  // ⌘J or ⌘` shows and hides the terminal, and Ctrl does too outside it:
+  // in the terminal, Ctrl+J and Ctrl+` are the shell's. Hiding it gives
+  // the keyboard back to the prompt.
+  const canTerminal = !!connection.info?.terminal && !!session && !session.archived;
+  const composerField = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!canTerminal) return;
+    const key = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if ((k !== "j" && k !== "`") || e.shiftKey || e.altKey) return;
+      const inTerminal = !!(e.target as Element | null)?.closest?.(".terminal");
+      if (!e.metaKey && !(e.ctrlKey && !inTerminal)) return;
+      // Capturing, so that xterm.js doesn't take it first.
+      e.preventDefault();
+      e.stopPropagation();
+      setShowTerminal(!showTerminal);
+      // Once the prompt is visible again.
+      if (showTerminal) setTimeout(() => composerField.current?.focus());
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [canTerminal, showTerminal]);
+
   const menu: MenuEntry[] = [
     harness?.modes?.length
       ? {
@@ -100,9 +123,7 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
         }
       : null,
     project?.isGitRepo && { label: "Changes", icon: FileDiff, onSelect: () => setShowDiff(true) },
-    connection.info?.terminal &&
-      session &&
-      !session.archived && { label: showTerminal ? "Hide Terminal" : "Terminal", icon: SquareTerminal, onSelect: () => setShowTerminal(!showTerminal) },
+    canTerminal && { label: showTerminal ? "Hide Terminal" : "Terminal", icon: SquareTerminal, onSelect: () => setShowTerminal(!showTerminal) },
     harness?.commands?.length
       ? {
           section: "Commands",
@@ -209,6 +230,7 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
             store={store}
             session={session}
             attachments={attachments}
+            field={composerField}
             onSend={() => {
               pinned.current = true;
               scrollToEnd();
@@ -295,18 +317,19 @@ function Composer({
   store,
   session,
   attachments,
+  field,
   onSend,
   onError,
 }: {
   store: SessionStore;
   session: Session | undefined;
   attachments: Attachments;
+  field: React.RefObject<HTMLTextAreaElement | null>;
   onSend: () => void;
   onError: (e: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [focused, setFocused] = useState(false);
-  const field = useRef<HTMLTextAreaElement>(null);
   const dictation = useDictation();
   const archived = session?.archived === true;
 

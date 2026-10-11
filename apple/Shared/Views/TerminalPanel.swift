@@ -95,7 +95,7 @@ struct TerminalPanel: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.borderless)
-            .help("Hide the terminal. The shell keeps running.")
+            .help("Hide the terminal (⌘J). The shell keeps running.")
             .accessibilityLabel("Hide Terminal")
         }
         .scaledFont(.caption)

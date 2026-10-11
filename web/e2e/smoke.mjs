@@ -145,6 +145,16 @@ await page.getByText("Echo: write a.txt").waitFor();
 await page.getByRole("button", { name: "Session", exact: true }).click();
 await page.getByRole("menuitem", { name: "Terminal" }).click();
 await terminalRows("42").waitFor();
+// ⌘J hides it and gives the prompt the keyboard; Ctrl+` there shows it
+// again. In the terminal, Ctrl+J is the shell's.
+await page.locator(".terminal textarea:focus").waitFor();
+await page.keyboard.press("Meta+j");
+await page.locator(".composer-field:focus").waitFor();
+await page.keyboard.press("Control+Backquote");
+await page.locator(".terminal textarea:focus").waitFor();
+await page.keyboard.press("Control+j");
+await page.waitForTimeout(300);
+await terminalRows("42").waitFor({ timeout: 1000 });
 for (const placement of ["below", "right"]) {
   await page.locator(".server-menu-button").click();
   await page.getByRole("menuitem", { name: "Settings" }).click();

@@ -25,6 +25,13 @@ struct NewSessionView: View {
     @State private var attachments = Attachments()
     @FocusState private var promptFocused: Bool
 
+    /// Starts in `projectID` when given, else in the project used last.
+    init(connection: ServerConnection, projectID: String = "", onCreated: @escaping (Session) -> Void) {
+        self.connection = connection
+        self.onCreated = onCreated
+        _projectID = State(initialValue: projectID)
+    }
+
     private var project: Project? { connection.projects[projectID] }
     private var harness: HarnessInfo? { connection.harness(harnessID) }
 

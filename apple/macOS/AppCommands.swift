@@ -6,6 +6,7 @@ struct AppCommands: Commands {
     @FocusedValue(\.newSession) private var newSession
     @FocusedValue(\.pairServer) private var pairServer
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(SessionGrouping.key) private var grouping = SessionGrouping.status
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -19,5 +20,9 @@ struct AppCommands: Commands {
                 .disabled(pairServer == nil)
         }
         SidebarCommands()
+        CommandGroup(after: .sidebar) {
+            SessionGrouping.Picker(grouping: $grouping)
+            Divider()
+        }
     }
 }

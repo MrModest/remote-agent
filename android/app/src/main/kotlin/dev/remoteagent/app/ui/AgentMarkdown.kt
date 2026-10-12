@@ -46,7 +46,7 @@ import org.intellij.markdown.ast.getTextInNode
  * The transcript's Markdown: GitHub-flavoured, in the palette's colours, at
  * the message size from Settings. Raw HTML is shown as text, never rendered.
  * `images` are the ones rad keeps that the text links to as `rad-image:<id>`.
- * Mirrors agentMarkdown() and Theme.agent in apple/Shared/Views/ItemViews.swift.
+ * Mirrors AgentMarkdown in apple/Shared/Views/AgentMarkdown.swift.
  */
 @Composable
 fun AgentMarkdown(text: String, modifier: Modifier = Modifier, images: List<ImageRef> = emptyList()) {

@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 
 /// The app's settings. On the Mac, the Settings window (⌘,); on iOS, a sheet.
@@ -58,8 +57,7 @@ struct SettingsView: View {
                 Section {
                     VStack(alignment: .leading, spacing: Metrics.gap) {
                         UserBubble(text: "Add tests for the parser.")
-                        Markdown("Done. The new tests cover **empty input** and `\\r\\n` line endings, and all 42 pass:\n\n```\nswift test --filter ParserTests\n```")
-                            .agentMarkdown()
+                        AgentMarkdown(text: "Done. The new tests cover **empty input** and `\\r\\n` line endings, and all 42 pass:\n\n```\nswift test --filter ParserTests\n```")
                     }
                     .padding(.vertical, 4)
                     .paletteText()

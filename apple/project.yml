@@ -8,9 +8,9 @@ options:
 packages:
   RAKit:
     path: RAKit
-  MarkdownUI:
-    url: https://github.com/gonzalezreal/swift-markdown-ui
-    from: 2.4.1
+  Textual:  # 0.x: a minor version may change the API.
+    url: https://github.com/gonzalezreal/textual
+    minorVersion: 0.5.0
   SwiftTerm:  # exact: 1.99 is the 2.0 preview, with a different API. Needs Xcode's Metal toolchain.
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.20.0
@@ -27,7 +27,7 @@ targets:
         excludes: [Info.plist]
     dependencies:
       - package: RAKit
-      - package: MarkdownUI
+      - package: Textual
       - package: SwiftTerm
     info:
       path: iOS/Info.plist
@@ -75,7 +75,7 @@ targets:
         excludes: [Info.plist, RemoteAgent.entitlements]
     dependencies:
       - package: RAKit
-      - package: MarkdownUI
+      - package: Textual
       - package: SwiftTerm
     info:
       path: macOS/Info.plist

@@ -1,4 +1,3 @@
-import MarkdownUI
 import PhotosUI
 import QuickLook
 import RAKit
@@ -272,43 +271,6 @@ struct ReplyImage: View {
 
     private func gallery(height: CGFloat) -> some View {
         ImageGallery(images: [ref], store: store, height: height, browsing: images)
-    }
-}
-
-/// Draws the images in an agent's reply: rad points the reply's Markdown
-/// images at its copies, `rad-image:<id>`. Other images load as before.
-@MainActor
-struct ReplyImageProvider: @preconcurrency ImageProvider {
-    let images: [ImageRef]
-    let store: SessionStore
-
-    @ViewBuilder func makeImage(url: URL?) -> some View {
-        if let id = url.flatMap(ImageRef.id(linkedBy:)) {
-            ReplyImage(ref: images.first { $0.id == id } ?? ImageRef(id: id, mimeType: "", size: 0),
-                       images: images, store: store)
-        } else {
-            DefaultImageProvider.default.makeImage(url: url)
-        }
-    }
-}
-
-/// An image in a line of a reply's text, which can't be tapped or resized,
-/// so it is drawn small.
-struct ReplyInlineImageProvider: InlineImageProvider {
-    let store: SessionStore
-    let scale: CGFloat
-    static let height: CGFloat = 120
-
-    func image(with url: URL, label: String) async throws -> Image {
-        guard let id = ImageRef.id(linkedBy: url) else {
-            return try await DefaultInlineImageProvider.default.image(with: url, label: label)
-        }
-        let data = try await store.imageData(id)
-        let pixels = Int(Self.height * scale)
-        guard let image = await Task.detached(operation: { ImageCoding.thumbnail(data, maxPixels: pixels) }).value else {
-            throw URLError(.cannotDecodeContentData)
-        }
-        return Image(image, scale: scale, label: Text(label))
     }
 }
 

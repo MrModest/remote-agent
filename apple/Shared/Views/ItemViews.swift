@@ -1,4 +1,3 @@
-import MarkdownUI
 import RAKit
 import SwiftUI
 
@@ -12,10 +11,7 @@ struct ItemView: View {
             UserBubble(text: item.text ?? "", images: item.images ?? [], store: store,
                        pending: item.status == .queued, cancelled: item.status == .cancelled)
         case .assistantMessage:
-            Markdown(item.text ?? "")
-                .agentMarkdown()
-                .replyImages(item.images ?? [], store: store)
-                .textSelection(.enabled)
+            AgentMarkdown(text: item.text ?? "", images: item.images ?? [], store: store)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .reasoning:
             ReasoningView(item: item)
@@ -268,7 +264,7 @@ struct PlanView: View {
         VStack(alignment: .leading, spacing: 4) {
             Label("Plan", systemImage: "list.bullet.clipboard").scaledFont(.footnote, weight: .semibold)
             if let text = plan?.text, !text.isEmpty {
-                Markdown(text).agentMarkdown()
+                AgentMarkdown(text: text)
             }
             ForEach(Array((plan?.entries ?? []).enumerated()), id: \.offset) { _, e in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -321,7 +317,7 @@ struct ApprovalView: View {
                 Text(d).scaledFont(.footnote).foregroundStyle(.secondary)
             }
             if a.special == .plan, let plan = a.planText {
-                ScrollView { Markdown(plan).agentMarkdown() }
+                ScrollView { AgentMarkdown(text: plan) }
                     .frame(maxHeight: 320)
             } else if a.special == .question {
                 ForEach(a.questions ?? [], id: \.question) { q in questionView(q) }
@@ -450,150 +446,5 @@ struct FlowChips: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-}
-
-extension View {
-    /// The transcript's Markdown, in the message and code fonts and the
-    /// message size from Settings.
-    func agentMarkdown() -> some View {
-        modifier(AgentMarkdown())
-    }
-
-    /// Draws the images a reply links to, which rad keeps (`ReplyImageProvider`).
-    func replyImages(_ images: [ImageRef], store: SessionStore) -> some View {
-        modifier(ReplyImages(images: images, store: store))
-    }
-}
-
-private struct ReplyImages: ViewModifier {
-    let images: [ImageRef]
-    let store: SessionStore
-    @Environment(\.displayScale) private var scale
-
-    func body(content: Content) -> some View {
-        content
-            .markdownImageProvider(ReplyImageProvider(images: images, store: store))
-            .markdownInlineImageProvider(ReplyInlineImageProvider(store: store, scale: scale))
-    }
-}
-
-private struct AgentMarkdown: ViewModifier {
-    @Environment(\.messageTextSize) private var size
-    @Environment(\.messageFont) private var font
-    @Environment(\.codeFont) private var codeFont
-
-    func body(content: Content) -> some View {
-        let codeScale = font.codeScale(codeFont)
-        // Inside the theme, so they replace its text styles. The text needs its
-        // colour here: Markdown sets the style's colour on its blocks, and with
-        // none it falls back to the system's rather than `paletteText()`.
-        return content
-            .markdownTextStyle(\.text) {
-                ForegroundColor(Palette.text)
-                FontSize(size)
-                FontFamily(font.markdownFamily)
-            }
-            .markdownTextStyle(\.code) {
-                FontFamily(codeFont.markdownFamily)
-                FontSize(.em(codeScale))
-                BackgroundColor(Palette.surface0)
-            }
-            .markdownTheme(.agent)
-    }
-}
-
-/// A fenced code block, in the code font.
-private struct MarkdownCodeBlock: View {
-    let configuration: CodeBlockConfiguration
-    @Environment(\.messageFont) private var font
-    @Environment(\.codeFont) private var codeFont
-
-    var body: some View {
-        let codeScale = font.codeScale(codeFont)
-        return ScrollView(.horizontal, showsIndicators: false) {
-            configuration.label
-                .relativeLineSpacing(.em(0.2))
-                .markdownTextStyle {
-                    FontFamily(codeFont.markdownFamily)
-                    FontSize(.em(codeScale))
-                }
-                .padding(8)
-        }
-        .background(Palette.crust, in: RoundedRectangle(cornerRadius: Metrics.Corner.inset))
-        .markdownMargin(top: 0, bottom: 8)
-    }
-}
-
-extension FontChoice {
-    var markdownFamily: FontProperties.Family {
-        switch self {
-        case .system(let design): .system(design)
-        case .family(let name): .custom(name)
-        }
-    }
-}
-
-extension MarkdownUI.Theme {
-    /// GitHub-like, sized for a transcript and in the palette's colours.
-    /// `agentMarkdown()` sets the text and inline code styles, which follow Settings.
-    @MainActor static let agent = Theme.gitHub
-        // GitHub leaves 16pt after paragraphs and 24pt above headings; a
-        // transcript reads better tighter.
-        .paragraph { configuration in
-            configuration.label
-                .fixedSize(horizontal: false, vertical: true)
-                .relativeLineSpacing(.em(0.2))
-                .markdownMargin(top: 0, bottom: 8)
-        }
-        .heading1 { heading($0, size: 1.4) }
-        .heading2 { heading($0, size: 1.25) }
-        .heading3 { heading($0, size: 1.1) }
-        .heading4 { heading($0, size: 1) }
-        .heading5 { heading($0, size: 0.9) }
-        .heading6 { heading($0, size: 0.85) }
-        .listItem { configuration in
-            configuration.label.markdownMargin(top: .em(0.15))
-        }
-        .table { configuration in
-            configuration.label
-                .fixedSize(horizontal: false, vertical: true)
-                .markdownTableBorderStyle(.init(color: Palette.surface1))
-                .markdownTableBackgroundStyle(.alternatingRows(Color.clear, Palette.mantle))
-                .markdownMargin(top: 0, bottom: 8)
-        }
-        .link {
-            ForegroundColor(Palette.blue)
-        }
-        .blockquote { configuration in
-            HStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Palette.surface1)
-                    .relativeFrame(width: .em(0.2))
-                configuration.label
-                    .markdownTextStyle { ForegroundColor(Palette.subtext) }
-                    .relativePadding(.horizontal, length: .em(1))
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .taskListMarker { configuration in
-            Image(systemName: configuration.isCompleted ? "checkmark.square.fill" : "square")
-                .foregroundStyle(configuration.isCompleted ? Palette.green : Palette.overlay)
-                .imageScale(.small)
-                .relativeFrame(minWidth: .em(1.5), alignment: .trailing)
-        }
-        .thematicBreak {
-            Rectangle().fill(Palette.surface1).frame(height: 1).markdownMargin(top: 8, bottom: 8)
-        }
-        .codeBlock { MarkdownCodeBlock(configuration: $0) }
-
-    @MainActor private static func heading(_ configuration: BlockConfiguration, size: CGFloat) -> some View {
-        configuration.label
-            .relativeLineSpacing(.em(0.125))
-            .markdownMargin(top: 12, bottom: 6)
-            .markdownTextStyle {
-                FontWeight(.semibold)
-                FontSize(.em(size))
-            }
     }
 }

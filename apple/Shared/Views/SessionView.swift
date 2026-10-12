@@ -411,18 +411,15 @@ struct SessionView: View {
         ToolbarItem(placement: .principal) {
             VStack(spacing: 0) {
                 Text(session?.title ?? "").scaledFont(.subheadline, weight: .semibold).lineLimit(1)
-                HStack(spacing: 4) {
-                    if let s = session {
-                        HarnessIcon(id: s.harness).imageScale(.small)
-                        Text(subtitle(s)).lineLimit(1)
+                if let s = session {
+                    // Where the line is too narrow for the branch, it goes.
+                    ViewThatFits(in: .horizontal) {
+                        titleDetails(s, branch: true)
+                        titleDetails(s, branch: false)
                     }
-                    if let f = session?.context?.fraction {
-                        Text("·")
-                        ContextGauge(fraction: f)
-                    }
+                    .scaledFont(.caption2)
+                    .foregroundStyle(.secondary)
                 }
-                .scaledFont(.caption2)
-                .foregroundStyle(.secondary)
             }
         }
         #endif
@@ -477,6 +474,40 @@ struct SessionView: View {
         }
     }
 
+    #if os(iOS)
+    /// The line under the title: the project and branch, then the agent.
+    private func titleDetails(_ s: Session, branch: Bool) -> some View {
+        HStack(spacing: 4) {
+            if let place = place(s, branch: branch) {
+                Text(place).fontWeight(.medium)
+                Text("·")
+            }
+            HarnessIcon(id: s.harness).imageScale(.small)
+            Text(subtitle(s))
+            if let f = s.context?.fraction {
+                Text("·")
+                ContextGauge(fraction: f)
+            }
+        }
+        .lineLimit(1)
+    }
+    #endif
+
+    /// "weather-api · main", or "weather-api · worktree ra/fix-cache": where
+    /// the agent works, which nothing else shows once the sidebar is hidden.
+    private func place(_ s: Session, branch: Bool = true) -> String? {
+        guard let project else { return nil }
+        var parts = [project.name]
+        if branch {
+            if s.workspace.kind == .worktree {
+                parts.append(["worktree", s.workspace.branch].compactMap { $0 }.joined(separator: " "))
+            } else if project.isGitRepo, let b = s.workspace.branch {
+                parts.append(b)
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
     /// "Opus 5.5 · high · Ask": the model (the harness until the agent reports
     /// one), its reasoning effort and the permission mode.
     private func subtitle(_ s: Session) -> String {
@@ -487,10 +518,12 @@ struct SessionView: View {
     }
 
     #if os(macOS)
-    /// The subtitle under the window title, with the context use at the end.
+    /// The subtitle under the window title: where the agent works, then the
+    /// agent, with the context use at the end.
     private func macSubtitle(_ s: Session) -> String {
         let context = s.context?.fraction.map { "\($0.formatted(.percent.precision(.fractionLength(0)))) context" }
-        return [subtitle(s), context].compactMap { $0 }.joined(separator: " · ")
+        let agent = [subtitle(s), context].compactMap { $0 }.joined(separator: " · ")
+        return [place(s), agent].compactMap { $0 }.joined(separator: " — ")
     }
     #endif
 

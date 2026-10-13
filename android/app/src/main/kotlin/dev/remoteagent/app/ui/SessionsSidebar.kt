@@ -90,6 +90,7 @@ fun SessionsSidebar(
     var showArchived by rememberSaveable { mutableStateOf(listOf<String>()) }
     var newSessionOn by rememberSaveable { mutableStateOf<String?>(null) }
     var newMenu by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
     var archiving by remember { mutableStateOf<ArchiveRequest?>(null) }
     var removing by remember { mutableStateOf<SavedServer?>(null) }
     var refreshing by remember { mutableStateOf(false) }
@@ -134,8 +135,14 @@ fun SessionsSidebar(
                     for (s in connected) MenuItem("On ${s.name}", Icons.server) { newMenu = false; newSessionOn = s.id }
                 }
             }
-            IconButton(onAdd, Modifier.testTag("add-server")) { Icon(painterResource(Icons.add), "Pair a server") }
-            IconButton(onSettings) { Icon(painterResource(Icons.settings), "Settings") }
+            // In a menu, as on iPad: a + here would read as a new session, as each server's does.
+            Box {
+                IconButton({ moreMenu = true }) { Icon(painterResource(Icons.more), "More") }
+                DropdownMenu(moreMenu, { moreMenu = false }, containerColor = palette.mantle) {
+                    MenuItem("Pair a server", Icons.add) { moreMenu = false; onAdd() }
+                    MenuItem("Settings", Icons.settings) { moreMenu = false; onSettings() }
+                }
+            }
         },
     ) { padding ->
         PullToRefreshBox(

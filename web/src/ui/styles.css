@@ -162,6 +162,13 @@ h4 {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.clamp3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 
 svg { flex: none; }
 
@@ -434,26 +441,77 @@ svg { flex: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* The sidebar in a wide window: every server, each with its sessions. */
+.server-section + .server-section { margin-top: 6px; }
+.server-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px 2px;
+}
+.server-header-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-selection);
+  font-weight: 600;
+}
+.server-header-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-header-action {
+  visibility: hidden;
+  color: var(--subtext);
+}
+.server-header:hover .server-header-action,
+.server-header:focus-within .server-header-action,
+.server-header-action[aria-expanded="true"] { visibility: visible; }
+@media (hover: none) {
+  .server-header-action { visibility: visible; }
+}
+.sidebar-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 8px;
+  border-radius: var(--r-selection);
+  text-align: start;
+}
+.sidebar-status .chevron {
+  margin-left: auto;
+  align-self: center;
+}
+.sidebar-status-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.server-header-main:hover,
+button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%, transparent); }
+
 .sidebar-foot {
   border-top: 1px solid var(--crust);
   padding: 6px 8px;
 }
-.server-menu-button {
+.sidebar-foot-button {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   padding: 6px 8px;
   border-radius: var(--r-card);
+  color: var(--subtext);
 }
-.server-menu-button:hover { background: var(--surface0); }
-.server-menu-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.sidebar-foot-button:hover { background: var(--surface0); }
 
 .empty {
   margin: auto;

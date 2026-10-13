@@ -5,17 +5,18 @@ import { useObserved } from "../store/observable";
 import type { ServerConnection } from "../store/serverConnection";
 import type { SavedServer, ServerStore } from "../store/serverStore";
 import { AddServer } from "./AddServer";
-import { ConnectionDot, connectionLabel } from "./components";
+import { ConnectionDot } from "./components";
 import { ConnectionContext, ServerStoreContext, useServerStore } from "./context";
 import { NewSession } from "./NewSession";
 import { Confirm, Empty, Menu } from "./primitives";
 import { navigate, useRoute, useWide, type Route } from "./router";
 import { ServerHome } from "./ServerHome";
+import { reconnect, SessionsSidebar, type ServerActions } from "./SessionsSidebar";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
 
 /** Sheets over the page. */
-type Sheet = { kind: "pair"; link?: string } | { kind: "new" } | { kind: "settings" } | { kind: "remove"; server: SavedServer } | { kind: "rename"; server: SavedServer };
+type Sheet = { kind: "pair"; link?: string } | { kind: "new"; connection: ServerConnection } | { kind: "settings" } | { kind: "remove"; server: SavedServer } | { kind: "rename"; server: SavedServer };
 
 export function App({ store }: { store: ServerStore }) {
   return (
@@ -59,11 +60,6 @@ function Root() {
   const server = store.server(route.serverID);
   const connection = server ? store.connection(server) : undefined;
 
-  // A wide window always shows a server; the first, if none was chosen.
-  useEffect(() => {
-    if (wide && !server && store.servers.length > 0) navigate({ serverID: store.servers[0].id }, true);
-  }, [wide, server, store.servers.length]);
-
   // A phone with one server opens it at launch, as the iPhone app does.
   const openedOnce = useRef(false);
   useEffect(() => {
@@ -76,7 +72,7 @@ function Root() {
     settings: () => setSheet({ kind: "settings" }),
     remove: (s) => setSheet({ kind: "remove", server: s }),
     rename: (s) => setSheet({ kind: "rename", server: s }),
-    newSession: () => setSheet({ kind: "new" }),
+    newSession: (c) => setSheet({ kind: "new", connection: c }),
   };
 
   let page;
@@ -93,9 +89,9 @@ function Root() {
       <ConnectionContext.Provider value={connection}>
         <ServerHome
           onOpen={(id) => navigate({ serverID: connection.server.id, sessionID: id })}
-          onNew={actions.newSession}
+          onNew={() => actions.newSession(connection)}
           onBack={() => navigate({})}
-          toolbar={<ServerMenuButton connection={connection} actions={actions} compact />}
+          toolbar={<ServerMenu connection={connection} actions={actions} />}
         />
       </ConnectionContext.Provider>
     );
@@ -109,9 +105,9 @@ function Root() {
       {sheet?.kind === "pair" && (
         <AddServer initialLink={sheet.link} onClose={() => setSheet(undefined)} onPaired={(s) => navigate({ serverID: s.id })} />
       )}
-      {sheet?.kind === "new" && connection && (
-        <ConnectionContext.Provider value={connection}>
-          <NewSession onClose={() => setSheet(undefined)} onCreated={(s) => navigate({ serverID: connection.server.id, sessionID: s.id })} />
+      {sheet?.kind === "new" && (
+        <ConnectionContext.Provider value={sheet.connection}>
+          <NewSession onClose={() => setSheet(undefined)} onCreated={(s) => navigate({ serverID: sheet.connection.server.id, sessionID: s.id })} />
         </ConnectionContext.Provider>
       )}
       {sheet?.kind === "settings" && <SettingsView onClose={() => setSheet(undefined)} />}
@@ -141,45 +137,15 @@ function Root() {
   );
 }
 
-interface ServerActions {
-  pair: () => void;
-  settings: () => void;
-  remove: (s: SavedServer) => void;
-  rename: (s: SavedServer) => void;
-  newSession: () => void;
-}
-
-/** The iPad and Mac layout: one server's sessions in the sidebar, the chosen
- *  session beside them. The menu at the foot of the sidebar switches servers. */
+/** The iPad and Mac layout: every server's sessions in the sidebar, the
+ *  chosen session beside them. */
 function Split({ route, connection, actions }: { route: Route; connection: ServerConnection | undefined; actions: ServerActions }) {
   const store = useServerStore();
   useObserved(connection);
   return (
     <div className="split">
       <aside className="sidebar">
-        {connection ? (
-          <ConnectionContext.Provider value={connection}>
-            <ServerHome
-              key={connection.server.id}
-              selected={route.sessionID}
-              onOpen={(id) => navigate({ serverID: connection.server.id, sessionID: id })}
-              onNew={actions.newSession}
-              footer={<ServerMenuButton connection={connection} actions={actions} />}
-            />
-          </ConnectionContext.Provider>
-        ) : (
-          <div className="server-home">
-            <header className="bar">
-              <h1 className="bar-title">Servers</h1>
-              <button className="icon-button" onClick={actions.settings} title="Settings" aria-label="Settings">
-                <Settings size={18} />
-              </button>
-              <button className="icon-button" onClick={actions.pair} title="Pair a server" aria-label="Pair a server">
-                <Plus />
-              </button>
-            </header>
-          </div>
-        )}
+        <SessionsSidebar route={route} actions={actions} />
       </aside>
       <main className="detail">
         {connection && route.sessionID ? (
@@ -218,54 +184,21 @@ function NoServers({ onPair }: { onPair: () => void }) {
   );
 }
 
-/** The server's name and status, and a menu with the server actions. At
- *  the foot of the sidebar, or (compact) a button in a phone's top bar. */
-function ServerMenuButton({ connection, actions, compact = false }: { connection: ServerConnection; actions: ServerActions; compact?: boolean }) {
-  const store = useServerStore();
-  useObserved(connection);
+/** The server actions, in the top bar of a server's sessions on a phone. */
+function ServerMenu({ connection, actions }: { connection: ServerConnection; actions: ServerActions }) {
   const server = connection.server;
-  const entries = [
-    ...(compact
-      ? []
-      : [
-          {
-            section: "Servers",
-            items: store.servers.map((s) => ({ label: s.name, checked: s.id === server.id, onSelect: () => navigate({ serverID: s.id }) })),
-          },
-          { label: "Pair a server", icon: Plus, onSelect: actions.pair },
-          "divider" as const,
-        ]),
-    {
-      label: "Reconnect",
-      icon: RefreshCw,
-      onSelect: () => {
-        // As pulling to refresh in the apps: also look for newly installed agents.
-        connection.retry();
-        void connection.refreshHarnesses(true);
-      },
-    },
-    { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
-    { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
-    "divider" as const,
-    { label: "Settings", icon: Settings, onSelect: actions.settings },
-  ];
-  if (compact) return <Menu label={<ChevronsUpDown size={18} />} title="Server" entries={entries} />;
   return (
-    <div className="sidebar-foot" title={connectionLabel(connection.state)}>
-      <Menu
-        className="server-menu-button"
-        align="start"
-        title={`${server.name}, ${connectionLabel(connection.state)}`}
-        label={
-          <>
-            <ConnectionDot state={connection.state} />
-            <span className="server-menu-name">{server.name}</span>
-            <ChevronsUpDown size={14} className="c-subtext" />
-          </>
-        }
-        entries={entries}
-      />
-    </div>
+    <Menu
+      label={<ChevronsUpDown size={18} />}
+      title="Server"
+      entries={[
+        { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
+        { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
+        { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
+        "divider",
+        { label: "Settings", icon: Settings, onSelect: actions.settings },
+      ]}
+    />
   );
 }
 

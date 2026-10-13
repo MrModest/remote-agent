@@ -156,8 +156,7 @@ await page.keyboard.press("Control+j");
 await page.waitForTimeout(300);
 await terminalRows("42").waitFor({ timeout: 1000 });
 for (const placement of ["below", "right"]) {
-  await page.locator(".server-menu-button").click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByLabel("Opens").selectOption(placement);
   await page.getByRole("button", { name: "Done" }).click();
   await page.locator(`.terminal-${placement} .terminal .xterm-rows`, { hasText: "42" }).waitFor();
@@ -192,8 +191,7 @@ await shot("worktree-reverted");
 await page.getByRole("button", { name: "Done" }).click();
 
 step("settings and light theme");
-await page.locator(".server-menu-button").click();
-await page.getByRole("menuitem", { name: "Settings" }).click();
+await page.getByRole("button", { name: "Settings", exact: true }).click();
 await page.locator("select").first().selectOption("light");
 await shot("settings-light");
 await page.getByRole("button", { name: "Done" }).click();
@@ -205,15 +203,26 @@ await shot("phone-session");
 await page.getByRole("button", { name: "Back" }).click();
 await shot("phone-sessions");
 
-step("archive");
+step("collapse the server, which a reload keeps");
 await page.setViewportSize({ width: 1280, height: 820 });
+const header = page.locator(".server-header-main");
+await header.click();
+await page.locator(".server-header-main[aria-expanded=false]").waitFor();
+await shot("collapsed");
+await page.reload();
+await page.locator(".server-header-main[aria-expanded=false]").waitFor();
+await header.click();
+await page.locator(".session-row").first().waitFor();
+
+step("archive");
 await page.locator(".session-row").first().hover();
 await page.getByRole("button", { name: "Archive" }).first().click();
 await page.getByRole("button", { name: "Archive", exact: true }).last().click();
 await page.getByText(/Archived/).waitFor();
 
 step("remove server");
-await page.locator(".server-menu-button").click();
+await page.locator(".server-header").hover();
+await page.getByRole("button", { name: / actions$/ }).click();
 await page.getByRole("menuitem", { name: /Remove/ }).click();
 await page.getByRole("button", { name: "Remove", exact: true }).click();
 await page.getByText("No servers").waitFor();

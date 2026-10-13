@@ -28,5 +28,16 @@ export function useObserved<T extends Observable | undefined>(o: T): T {
   return o;
 }
 
+/** Re-renders the component whenever any of `list` changes. */
+export function useObservedAll(list: readonly Observable[]) {
+  useSyncExternalStore(
+    (l) => {
+      const stops = list.map((o) => o.watch(l));
+      return () => stops.forEach((stop) => stop());
+    },
+    () => list.map((o) => o.getVersion()).join(" "),
+  );
+}
+
 const noopSubscribe = () => () => {};
 const zero = () => 0;

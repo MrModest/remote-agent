@@ -9,9 +9,13 @@ public enum ConnectionState: Equatable, Sendable {
 }
 
 /// A live connection to one server: keeps the index (projects + sessions)
-/// in sync, owns per-session stores, and reconnects with backoff.
+/// in sync, owns per-session stores, and reconnects with backoff. It stays
+/// `.connecting` while it tries, and gives up after `maxAttempts` failures
+/// in a row: `.failed` until `start()` or `retry()`.
 @MainActor @Observable
 public final class ServerConnection {
+    /// Failed attempts in a row before the connection gives up.
+    public static let maxAttempts = 5
     public let server: SavedServer
     public private(set) var state: ConnectionState = .idle
     public private(set) var info: ServerInfo?
@@ -30,6 +34,8 @@ public final class ServerConnection {
     @ObservationIgnored let drafts: Drafts
     private var wanted = false
     private var runTask: Task<Void, Never>?
+    /// The wait after the first failed attempt, doubling after each one.
+    @ObservationIgnored var firstRetryDelay: Double = 1
     private var messagesTask: Task<Void, Never>?
     private let onURLWorked: (URL) -> Void
 
@@ -92,7 +98,8 @@ public final class ServerConnection {
     }
 
     private func runLoop() async {
-        var delay: Double = 1
+        var delay = firstRetryDelay
+        var failures = 0
         while !Task.isCancelled && wanted {
             if await client.isConnected {
                 try? await Task.sleep(for: .seconds(2))
@@ -103,15 +110,22 @@ public final class ServerConnection {
                 info = try await client.connect(baseURLs: server.urls)
                 if let url = await client.connectedURL { onURLWorked(url) }
                 state = .connected
-                delay = 1
+                delay = firstRetryDelay
+                failures = 0
                 await resubscribeAll()
                 Task { await refreshHarnesses() }
             } catch {
                 if Task.isCancelled { return }
-                let msg = (error as? RPCError)?.code == "unauthorized" ? "This device is no longer authorized; pair again." : error.localizedDescription
-                state = .failed(msg)
+                failures += 1
+                // Trying again won't bring back a revoked token.
+                let unauthorized = (error as? RPCError)?.code == "unauthorized"
+                if unauthorized || failures >= Self.maxAttempts {
+                    state = .failed(unauthorized ? "This device is no longer authorized; pair again." : error.localizedDescription)
+                    runTask = nil
+                    return
+                }
                 try? await Task.sleep(for: .seconds(delay))
-                delay = min(delay * 2, 30)
+                delay *= 2
             }
         }
     }
@@ -151,7 +165,8 @@ public final class ServerConnection {
             indexLive = false
             indexOutstanding = 0
             for s in sessionStores.values { s.closed() }
-            if wanted { state = .connecting }
+            // Not after pause(): the socket closed because we closed it.
+            if wanted && runTask != nil { state = .connecting }
         }
     }
 

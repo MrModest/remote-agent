@@ -49,7 +49,9 @@ sealed interface ConnectionState {
 
 /**
  * A live connection to one server: keeps the index (projects + sessions)
- * in sync, owns per-session stores, and reconnects with backoff.
+ * in sync, owns per-session stores, and reconnects with backoff. It stays
+ * `Connecting` while it tries, and gives up after `MAX_ATTEMPTS` failures in
+ * a row: `Failed` until `start()` or `retry()`.
  * Mirrors apple/RAKit/Sources/RAKit/Store/ServerConnection.swift. Its state
  * changes on `scope` (the app: the main thread).
  */
@@ -88,6 +90,8 @@ class ServerConnection(
     private val sessionStores = HashMap<String, SessionStore>()
     private var wanted = false
     private var runJob: Job? = null
+    /** The wait after the first failed attempt, doubling after each one. */
+    internal var firstRetryDelay: Duration = 1.seconds
     /** Cuts the run loop's wait short: the socket closed, so reconnect now. */
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
@@ -148,7 +152,8 @@ class ServerConnection(
     }
 
     private suspend fun runLoop() {
-        var delay = 1L
+        var delay = firstRetryDelay
+        var failures = 0
         while (currentCoroutineContext().isActive && wanted) {
             if (client.isConnected) {
                 sleep(2.seconds)
@@ -159,13 +164,20 @@ class ServerConnection(
                 _info.value = client.connect(_server.value.urls)
                 client.connectedURL?.let(onURLWorked)
                 _state.value = ConnectionState.Connected
-                delay = 1
+                delay = firstRetryDelay
+                failures = 0
                 resubscribeAll()
                 scope.launch { refreshHarnesses() }
             } catch (e: RpcError) {
-                _state.value = ConnectionState.Failed(e.message)
-                sleep(delay.seconds)
-                delay = minOf(delay * 2, 30)
+                failures += 1
+                // Trying again won't bring back a revoked token.
+                if (e.code == "unauthorized" || failures >= MAX_ATTEMPTS) {
+                    _state.value = ConnectionState.Failed(e.message)
+                    runJob = null
+                    return
+                }
+                sleep(delay)
+                delay *= 2
             }
         }
     }
@@ -396,6 +408,11 @@ class ServerConnection(
 
     suspend fun archive(sessionID: String, removeWorktree: Boolean) {
         client.callRaw("session.archive", params("sessionId" to sessionID, "removeWorktree" to removeWorktree))
+    }
+
+    companion object {
+        /** Failed attempts in a row before the connection gives up. */
+        const val MAX_ATTEMPTS = 5
     }
 }
 

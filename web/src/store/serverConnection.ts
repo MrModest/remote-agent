@@ -27,8 +27,12 @@ export interface NewSession {
 }
 
 /** A live connection to one server: keeps the index (projects and sessions)
- *  in sync, owns per-session stores, and reconnects with backoff. */
+ *  in sync, owns per-session stores, and reconnects with backoff. It stays
+ *  `connecting` while it tries, and gives up after `maxAttempts` failures in
+ *  a row: `failed` until `start()` or `retry()`. */
 export class ServerConnection extends Observable implements SessionHost {
+  /** Failed attempts in a row before the connection gives up. */
+  static readonly maxAttempts = 5;
   state: ConnectionState = { kind: "idle" };
   info: ServerInfo | undefined;
   projects = new Map<string, Project>();
@@ -49,6 +53,8 @@ export class ServerConnection extends Observable implements SessionHost {
   /** Bumped to stop the current run loop. */
   private run = 0;
   private wake: (() => void) | undefined;
+  /** The wait after the first failed attempt, in seconds, doubling after each one. */
+  firstRetryDelay = 1;
 
   constructor(
     public server: SavedServer,
@@ -125,7 +131,8 @@ export class ServerConnection extends Observable implements SessionHost {
   private looping = false;
 
   private async runLoop(run: number) {
-    let delay = 1;
+    let delay = this.firstRetryDelay;
+    let failures = 0;
     try {
       while (run === this.run && this.wanted) {
         if (this.client.isConnected) {
@@ -139,14 +146,21 @@ export class ServerConnection extends Observable implements SessionHost {
           this.info = info;
           if (this.client.connectedURL) this.onURLWorked(this.client.connectedURL);
           this.setState({ kind: "connected" });
-          delay = 1;
+          delay = this.firstRetryDelay;
+          failures = 0;
           await this.resubscribeAll();
           void this.refreshHarnesses();
         } catch (e) {
           if (run !== this.run) return;
-          this.setState({ kind: "failed", message: (e as Error).message });
+          failures++;
+          // Trying again won't bring back a revoked token.
+          const unauthorized = e instanceof RPCError && e.code === "unauthorized";
+          if (unauthorized || failures >= ServerConnection.maxAttempts) {
+            this.setState({ kind: "failed", message: (e as Error).message });
+            return;
+          }
           await this.sleep(delay);
-          delay = Math.min(delay * 2, 30);
+          delay *= 2;
         }
       }
     } finally {
@@ -218,7 +232,8 @@ export class ServerConnection extends Observable implements SessionHost {
         this.indexLive = false;
         this.indexOutstanding = 0;
         for (const s of this.sessionStores.values()) s.closed();
-        if (this.wanted) {
+        // Not after pause(): the socket closed because we closed it.
+        if (this.wanted && this.looping) {
           this.setState({ kind: "connecting" });
           this.wake?.();
         }

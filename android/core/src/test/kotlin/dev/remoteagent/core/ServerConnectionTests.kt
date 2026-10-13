@@ -14,7 +14,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -31,6 +33,8 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /** The index stream's sync rules (protocol/PROTOCOL.md, "Streams and sync") against a fake rad. */
@@ -49,11 +53,17 @@ class ServerConnectionTests {
         server.close()
     }
 
-    private suspend fun connect(): ServerConnection {
+    private suspend fun connect(firstRetryDelay: Duration = 1.seconds): ServerConnection {
         val saved = SavedServer("srv", "Test", listOf(server.base()), "dev1", Instant.now())
         val c = ServerConnection(saved, "tok", scope, ImageCache(null), {})
+        c.firstRetryDelay = firstRetryDelay
         withContext(dispatcher) { c.start() }
         return c
+    }
+
+    /** Polls until `condition` holds, or fails after 10 s. */
+    private suspend fun waitUntil(condition: () -> Boolean) = withTimeout(10.seconds) {
+        while (!condition()) delay(5)
     }
 
     private fun synchronized(seq: Long, reset: Boolean) = buildJsonObject {
@@ -120,10 +130,52 @@ class ServerConnectionTests {
 
     @Test
     fun revokedDeviceFails() = runBlocking {
-        server.enqueue(MockResponse.Builder().code(401).body("""{"code":"unauthorized","message":"bad token"}""").build())
-        val c = connect()
+        repeat(2) { server.enqueue(MockResponse.Builder().code(401).body("""{"code":"unauthorized","message":"bad token"}""").build()) }
+        val c = connect(firstRetryDelay = 10.milliseconds)
         val failed = withTimeout(5.seconds) { c.state.first { it is ConnectionState.Failed } }
         assertEquals(ConnectionState.Failed(RpcError.unauthorized().message), failed)
+        // Trying again won't bring back a revoked token, so it doesn't.
+        delay(200)
+        assertEquals(1, server.requestCount)
+        withContext(dispatcher) { c.stop() }
+    }
+
+    @Test
+    fun givesUpUntilStartedAgain() = runBlocking {
+        // Each attempt's upgrade is turned away; one spare shows any attempt too many.
+        val rounds = 3
+        repeat(rounds * ServerConnection.MAX_ATTEMPTS + 1) { server.enqueue(MockResponse.Builder().code(503).build()) }
+        val saved = SavedServer("srv", "Test", listOf(server.base()), "dev1", Instant.now())
+        val c = ServerConnection(saved, "tok", scope, ImageCache(null), {})
+        c.firstRetryDelay = 10.milliseconds
+        val seen = mutableListOf<ConnectionState>() // only touched on the dispatcher
+        withContext(dispatcher) {
+            scope.launch { c.state.collect { seen += it } }
+            c.start()
+        }
+        suspend fun seen() = withContext(dispatcher) { seen.toList() }
+        val failed = ConnectionState.Failed("Could not connect to ${server.base()}")
+        waitUntil { c.state.value is ConnectionState.Failed }
+        assertEquals(failed, c.state.value)
+        // Connecting between attempts, failed only once it gave up.
+        assertEquals(listOf(ConnectionState.Idle, ConnectionState.Connecting, failed), seen())
+        assertEquals(ServerConnection.MAX_ATTEMPTS, server.requestCount)
+
+        // Given up: no more attempts, so it stays failed.
+        delay(200)
+        assertEquals(failed, c.state.value)
+        assertEquals(ServerConnection.MAX_ATTEMPTS, server.requestCount)
+
+        // Opening the server, or coming back to the app, tries again.
+        withContext(dispatcher) { c.start() }
+        waitUntil { server.requestCount == 2 * ServerConnection.MAX_ATTEMPTS && c.state.value is ConnectionState.Failed }
+        // So does Retry.
+        withContext(dispatcher) { c.retry() }
+        waitUntil { server.requestCount == rounds * ServerConnection.MAX_ATTEMPTS && c.state.value is ConnectionState.Failed }
+        delay(200)
+        assertEquals(rounds * ServerConnection.MAX_ATTEMPTS, server.requestCount)
+        val connecting = listOf(ConnectionState.Connecting, failed)
+        assertEquals(listOf(ConnectionState.Idle) + List(rounds) { connecting }.flatten(), seen())
         withContext(dispatcher) { c.stop() }
     }
 }

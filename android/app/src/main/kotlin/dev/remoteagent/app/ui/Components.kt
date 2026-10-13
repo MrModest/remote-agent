@@ -118,14 +118,14 @@ fun ContextGauge(fraction: Double, style: TextStyle = Type.caption) {
 }
 
 @Composable
-fun ConnectionDot(state: ConnectionState) {
+fun ConnectionDot(state: ConnectionState, size: Dp = 10.dp) {
     val color = when (state) {
         ConnectionState.Connected -> palette.green
         ConnectionState.Connecting -> palette.yellow
         is ConnectionState.Failed -> palette.red
         ConnectionState.Idle -> palette.overlay
     }
-    Canvas(Modifier.size(10.dp).semantics { contentDescription = connectionLabel(state) }) { drawCircle(color) }
+    Canvas(Modifier.size(size).semantics { contentDescription = connectionLabel(state) }) { drawCircle(color) }
 }
 
 fun connectionLabel(state: ConnectionState) = when (state) {

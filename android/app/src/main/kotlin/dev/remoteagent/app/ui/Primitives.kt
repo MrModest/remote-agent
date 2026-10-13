@@ -22,6 +22,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -235,6 +236,17 @@ fun ErrorDialog(message: String?, title: String = "Something went wrong", onDism
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = { TextButton(onDismiss) { Text("OK", color = palette.accent) } },
+    )
+}
+
+/** An item of a dropdown menu, greyed out while disabled. */
+@Composable
+fun MenuItem(text: String, icon: Int?, color: Color = palette.text, enabled: Boolean = true, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text, color = if (enabled) color else palette.overlay) },
+        leadingIcon = icon?.let { { Icon(painterResource(it), null, tint = if (enabled) color else palette.overlay) } },
+        enabled = enabled,
+        onClick = onClick,
     )
 }
 

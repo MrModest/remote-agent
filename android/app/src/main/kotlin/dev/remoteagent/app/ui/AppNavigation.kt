@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
@@ -77,17 +79,30 @@ private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
     val link by pendingLink.collectAsStateWithLifecycle()
     var showAdd by rememberSaveable { mutableStateOf(false) }
 
-    // With a single server, open it once at launch; not on every return to
-    // the list, which would bounce the user back in.
+    // Wide is where the list-detail strategy puts the list beside the session,
+    // decided from the same directive: there the root is the sidebar of every
+    // server's sessions, as on iPad. Narrow, it is a phone's stack.
+    val directive = calculatePaneScaffoldDirective(currentWindowAdaptiveInfoV2())
+    val wide = directive.maxHorizontalPartitions > 1
+    val listDetail = rememberListDetailSceneStrategy<NavKey>(directive = directive)
+    LaunchedEffect(wide) {
+        val normalized = normalizedBackStack(backStack, wide)
+        if (normalized != backStack.toList()) {
+            backStack.clear()
+            backStack.addAll(normalized)
+        }
+    }
+
+    // With a single server, open it once at launch on a phone; not on every
+    // return to the list, which would bounce the user back in.
     var autoOpened by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (autoOpened) return@LaunchedEffect
         autoOpened = true
         val servers = store.servers.value
-        if (backStack.size == 1 && servers.size == 1) backStack.add(ServerHomeKey(servers[0].id))
+        if (!wide && backStack.size == 1 && servers.size == 1) backStack.add(ServerHomeKey(servers[0].id))
     }
 
-    val listDetail = rememberListDetailSceneStrategy<NavKey>()
     val activity = LocalActivity.current
     NavDisplay(
         backStack = backStack,
@@ -95,26 +110,36 @@ private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
         onBack = { if (backStack.size > 1) backStack.removeLastOrNull() else activity?.finish() },
         sceneStrategies = listOf(listDetail),
         entryProvider = entryProvider {
-            entry<ServersKey> {
-                ServersView(
-                    onOpen = { backStack.add(ServerHomeKey(it.id)) },
-                    onAdd = { showAdd = true },
-                    onSettings = { backStack.add(SettingsKey) },
-                )
+            entry<ServersKey>(
+                metadata = if (wide) ListDetailSceneStrategy.listPane(detailPlaceholder = { NoSessionSelected(onAdd = { showAdd = true }) }) else emptyMap(),
+            ) {
+                if (wide) {
+                    SessionsSidebar(
+                        selection = backStack.lastOrNull() as? SessionKey,
+                        onOpenSession = { backStack.openSession(it) },
+                        onAdd = { showAdd = true },
+                        onSettings = { backStack.add(SettingsKey) },
+                        onRemoved = { server -> backStack.removeAll { it.serverId == server.id } },
+                    )
+                } else {
+                    ServersView(
+                        onOpen = { backStack.add(ServerHomeKey(it.id)) },
+                        onAdd = { showAdd = true },
+                        onSettings = { backStack.add(SettingsKey) },
+                    )
+                }
             }
-            entry<ServerHomeKey>(metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = { NoSessionSelected() })) { key ->
+            entry<ServerHomeKey> { key ->
                 val server = store.server(key.serverId)
                 if (server == null) {
                     LaunchedEffect(key) { backStack.remove(key) }
                 } else {
-                    val selected = (backStack.lastOrNull() as? SessionKey)?.takeIf { it.serverId == key.serverId }?.sessionId
                     ServerHomeView(
                         connection = store.connection(server),
-                        selectedSession = selected,
                         onOpenSession = { id -> backStack.openSession(SessionKey(key.serverId, id)) },
                         onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
                         onSettings = { backStack.add(SettingsKey) },
-                        onRemoved = { backStack.removeAll { it == key || (it as? SessionKey)?.serverId == key.serverId } },
+                        onRemoved = { backStack.removeAll { it.serverId == key.serverId } },
                     )
                 }
             }
@@ -141,12 +166,43 @@ private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
             onPaired = { server ->
                 showAdd = false
                 pendingLink.value = null
-                backStack.removeAll { it != ServersKey }
-                backStack.add(ServerHomeKey(server.id))
+                if (wide) {
+                    // The sidebar lists it with the others. A session open on it
+                    // from before it was paired again had the old connection.
+                    backStack.removeAll { it == SettingsKey || it.serverId == server.id }
+                } else {
+                    backStack.removeAll { it != ServersKey }
+                    backStack.add(ServerHomeKey(server.id))
+                }
             },
         )
     }
 }
+
+/** The server a destination is on, if it is on one. */
+private val NavKey.serverId: String?
+    get() = when (this) {
+        is ServerHomeKey -> serverId
+        is SessionKey -> serverId
+        else -> null
+    }
+
+/**
+ * The back stack for the layout. Wide, the sidebar lists every server's
+ * sessions, so there are no server homes in it. Narrow, a session sits on
+ * its server's sessions, so back from it goes there, as on a phone.
+ */
+internal fun normalizedBackStack(stack: List<NavKey>, wide: Boolean): List<NavKey> =
+    if (wide) {
+        stack.filter { it !is ServerHomeKey }
+    } else {
+        buildList {
+            for (key in stack) {
+                if (key is SessionKey && lastOrNull() != ServerHomeKey(key.serverId)) add(ServerHomeKey(key.serverId))
+                add(key)
+            }
+        }
+    }
 
 /** Opens a session: in place of the one shown beside the list, or pushed on a phone. */
 private fun NavBackStack<NavKey>.openSession(key: SessionKey) {
@@ -155,7 +211,16 @@ private fun NavBackStack<NavKey>.openSession(key: SessionKey) {
     add(key)
 }
 
+/** Beside the sidebar, until a session is open; with no servers, the way to pair one. */
 @Composable
-private fun NoSessionSelected() {
-    EmptyState(Icons.question, "No session selected", description = "Choose a session in the list, or start a new one.")
+private fun NoSessionSelected(onAdd: () -> Unit) {
+    val servers by LocalStore.current.servers.collectAsStateWithLifecycle()
+    if (servers.isEmpty()) {
+        EmptyState(
+            Icons.server, "No servers", description = "Run `rad serve` on your computer, then `rad pair` and scan the QR code.",
+            action = "Pair a server" to onAdd,
+        )
+    } else {
+        EmptyState(Icons.question, "No session selected", description = "Choose a session in the list, or start a new one.")
+    }
 }

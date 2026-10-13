@@ -1,10 +1,7 @@
 package dev.remoteagent.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,13 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,18 +32,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.remoteagent.core.protocol.HarnessInfo
-import dev.remoteagent.core.protocol.Project
 import dev.remoteagent.core.protocol.Session
 import dev.remoteagent.core.protocol.SessionStatus
-import dev.remoteagent.core.protocol.Workspace
 import dev.remoteagent.core.store.ConnectionState
 import dev.remoteagent.core.store.SavedServer
 import dev.remoteagent.core.store.ServerConnection
@@ -58,14 +48,14 @@ import dev.remoteagent.core.store.archivedSessions
 import kotlinx.coroutines.launch
 
 /**
- * A server's sessions. On a phone it is pushed and pushes sessions; on a
- * tablet it is the list beside the session. Mirrors apple/Shared/Views/ServerHomeView.swift.
+ * A server's sessions on a phone, pushed from the server list. It pushes
+ * sessions in turn. A tablet has every server's in its sidebar
+ * (SessionsSidebar) instead. Mirrors apple/iOS/ServerHomeView.swift.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerHomeView(
     connection: ServerConnection,
-    selectedSession: String?,
     onOpenSession: (String) -> Unit,
     onBack: () -> Unit,
     onSettings: () -> Unit,
@@ -81,10 +71,11 @@ fun ServerHomeView(
     var menu by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<SavedServer?>(null) }
     var showNew by rememberSaveable { mutableStateOf(false) }
-    var archiveTarget by remember { mutableStateOf<Session?>(null) }
+    var archiving by remember { mutableStateOf<ArchiveRequest?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var showArchived by rememberSaveable { mutableStateOf(false) }
 
+    // Opening a server it gave up on tries again.
     LaunchedEffect(connection) { connection.start() }
 
     Screen(
@@ -123,10 +114,9 @@ fun ServerHomeView(
                 val attention = active.filter { it.status == SessionStatus.AWAITING_APPROVAL }
                 fun rows(list: List<Session>) = items(list, key = { it.id }) { s ->
                     SessionRowItem(
-                        s, projects[s.projectId], harnesses?.firstOrNull { it.id == s.harness },
-                        selected = s.id == selectedSession,
+                        s, projects[s.projectId], harnesses?.firstOrNull { it.id == s.harness }, background = palette.base,
                         onClick = { onOpenSession(s.id) },
-                        onArchive = { archiveTarget = s },
+                        onArchive = { archiving = ArchiveRequest(s, connection) },
                     )
                 }
                 if (attention.isNotEmpty()) {
@@ -161,19 +151,7 @@ fun ServerHomeView(
         }
     }
 
-    archiveTarget?.let { s ->
-        val worktree = s.workspace.kind == Workspace.Kind.WORKTREE
-        val deleteWorktree: () -> Unit = { scope.launch { runCatching { connection.archive(s.id, removeWorktree = true) } } }
-        ConfirmDialog(
-            title = "Archive session?",
-            message = if (worktree) "The branch ${s.workspace.branch ?: ""} is kept either way." else "The agent process is stopped.",
-            confirm = "Archive",
-            destructive = false,
-            onConfirm = { scope.launch { runCatching { connection.archive(s.id, removeWorktree = false) } } },
-            onDismiss = { archiveTarget = null },
-            extra = if (worktree) "Archive and delete worktree" to deleteWorktree else null,
-        )
-    }
+    ArchiveSessionDialog(archiving, onDismiss = { archiving = null })
     RemoveServerDialog(removing, onDismiss = { removing = null }, onRemove = onRemoved)
     if (showNew) {
         NewSessionDialog(connection, onDismiss = { showNew = false }, onCreated = { s ->
@@ -191,7 +169,7 @@ private fun LazyListScope.banner(state: ConnectionState, indexSynced: Boolean, o
                     Icon(painterResource(Icons.offline), null, tint = palette.red, modifier = Modifier.size(18.dp))
                     Text(state.message, style = Type.body, color = palette.red, modifier = Modifier.testTag("connection-error"))
                 }
-                TextButton(onRetry) { Text("Retry now", color = palette.accent) }
+                TextButton(onRetry) { Text("Try again", color = palette.accent) }
             }
         }
         state == ConnectionState.Connecting && indexSynced -> item(key = "banner") {
@@ -204,72 +182,9 @@ private fun LazyListScope.banner(state: ConnectionState, indexSynced: Boolean, o
 }
 
 @Composable
-fun SectionHeader(text: String) {
+private fun SectionHeader(text: String) {
     Text(
         text, style = Type.footnote.copy(fontWeight = FontWeight.SemiBold), color = palette.subtext,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
     )
-}
-
-@Composable
-fun MenuItem(text: String, icon: Int?, color: Color = palette.text, enabled: Boolean = true, onClick: () -> Unit) {
-    DropdownMenuItem(
-        text = { Text(text, color = if (enabled) color else palette.overlay) },
-        leadingIcon = icon?.let { { Icon(painterResource(it), null, tint = if (enabled) color else palette.overlay) } },
-        enabled = enabled,
-        onClick = onClick,
-    )
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun SessionRowItem(
-    session: Session,
-    project: Project?,
-    harness: HarnessInfo?,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onArchive: () -> Unit,
-) {
-    var menu by remember { mutableStateOf(false) }
-    SwipeAction("Archive", Icons.archive, palette.blue, enabled = !session.archived, onSwipe = onArchive) {
-        Box(Modifier.background(palette.base)) {
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                    .background(if (selected) palette.surface0 else Color.Transparent, RoundedCornerShape(Metrics.Corner.selection))
-                    .combinedClickable(onClick = onClick, onLongClick = { if (!session.archived) menu = true })
-                    .testTag("session-row"),
-            ) {
-                SessionRow(session, project, harness, Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
-            }
-            DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-                MenuItem("Archive…", Icons.archive) { menu = false; onArchive() }
-            }
-        }
-    }
-}
-
-@Composable
-fun SessionRow(session: Session, project: Project?, harness: HarnessInfo?, modifier: Modifier = Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 2.dp)) { StatusIcon(session.status, background = session.backgroundTasks.isNotEmpty()) }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(session.title, style = Type.body.copy(fontWeight = FontWeight.Medium), color = palette.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            // The time sits on this line, so the title gets the full width.
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                HarnessBadge(session.harness, harness?.name)
-                project?.let { Text(it.name, style = Type.caption, color = palette.subtext, maxLines = 1) }
-                if (session.workspace.kind == Workspace.Kind.WORKTREE) {
-                    session.workspace.branch?.let { b ->
-                        Row(Modifier.weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(painterResource(Icons.branch), null, Modifier.size(12.dp), tint = palette.subtext)
-                            Text(b, style = Type.caption, color = palette.subtext, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                        }
-                    }
-                }
-                Spacer(Modifier.weight(1f).width(4.dp))
-                RelativeTime(session.updatedAt)
-            }
-        }
-    }
 }

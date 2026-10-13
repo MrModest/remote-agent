@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Walks the Android app through the fake harness on an emulator, as
 # web/e2e/smoke.mjs does the web client: pairing by deep link, a new worktree
-# session, the fake keywords, images, changes and revert, the terminal, the
-# dark theme. Saves screenshots to $SCRATCH/shots and removes the server at
-# the end, which unpairs it. Never point it at the developer's rad.
+# session, the fake keywords, images, changes and revert, the terminal, a
+# tablet's sidebar, the dark theme. Saves screenshots to $SCRATCH/shots and
+# removes the server at the end, which unpairs it. Never point it at the
+# developer's rad.
 #
 #   export ANDROID_HOME=… SCRATCH=…    # $SCRATCH/radhome: a scratch rad on 127.0.0.1:7499 with fake: true
 #   android/e2e/smoke.sh               # $SCRATCH/root/proj: a git repo under its roots
+#
+# PORT names another port the scratch rad listens on, RAD another binary.
 #
 # An emulator must be running (adb devices). Installs the debug build first.
 set -euo pipefail
@@ -14,6 +17,7 @@ cd "$(dirname "$0")/../.."
 . android/e2e/lib.sh
 RAD="${RAD:-server/bin/rad}"
 PROJECT="${PROJECT:-proj}"
+PORT="${PORT:-7499}"
 radctl() { RAD_HOME="$SCRATCH/radhome" "$RAD" "$@"; }
 
 fail() {
@@ -26,9 +30,13 @@ step() { echo "== $*"; }
 worktree() { dirname "$(find "$SCRATCH/radhome/data/worktrees" -name smoke.txt -newer "$SCRATCH/.smoke-start" | head -1)"; }
 
 touch "$SCRATCH/.smoke-start"
-"$A" reverse tcp:7499 tcp:7499 > /dev/null
+"$A" reverse tcp:$PORT tcp:$PORT > /dev/null
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do "$A" shell settings put global $k 0; done
-trap 'for k in window_animation_scale transition_animation_scale animator_duration_scale; do "$A" shell settings put global $k 1; done' EXIT
+restore() {
+  for k in window_animation_scale transition_animation_scale animator_duration_scale; do "$A" shell settings put global $k 1; done
+  if [ -n "${WIDE:-}" ]; then "$A" shell wm size reset; "$A" shell wm density reset; fi
+}
+trap restore EXIT
 
 step "install and pair"
 (cd android && ./gradlew -q :app:installDebug)
@@ -89,11 +97,11 @@ type_text 'screenshot'; tap 'id=send'; sleep 3
 shot 04-images
 
 step "/compact"
-tap 'id=session-menu'; sleep 0.5; tap 'text=/compact'
+hide_keyboard; tap 'id=session-menu'; sleep 0.5; tap 'text=/compact'
 wait_for 'text=Context compacted' 15 || fail "no compact notice"
 
 step "changes and revert"
-tap 'id=session-menu'; sleep 0.5; tap 'text=Changes'
+hide_keyboard; tap 'id=session-menu'; sleep 0.5; tap 'text=Changes'
 wait_for 'id=file-row' 10 || fail "no changes"
 shot 05-changes
 picture=$(ls "$(worktree)"/picture-*.png | head -1)
@@ -104,17 +112,26 @@ wait_for 'id=reverted' 10 || fail "no revert"
 tap 'desc=Done'; sleep 1
 
 step "terminal"
-tap 'id=session-menu'; sleep 0.5; tap 'text=Terminal'; sleep 3
+hide_keyboard; tap 'id=session-menu'; sleep 0.5; tap 'text=Terminal'; sleep 3
 fill 'id=terminal' 'expr 40 + 2 > t42.txt'; "$A" shell input keyevent KEYCODE_ENTER; sleep 1.5
 [ "$(cat "$(worktree)/t42.txt" 2>/dev/null)" = 42 ] || fail "the shell didn't write t42.txt"
 shot 06-terminal
 tap 'desc=Hide Terminal'; sleep 0.5
 
+step "tablet"
+# Wide, every server's sessions are in a sidebar beside the open session.
+WIDE=1; "$A" shell wm size 2560x1600; "$A" shell wm density 320
+wait_for 'id=server-header' 10 || fail "no sidebar on a tablet"
+[ "$(texts 'text=write smoke.txt' | grep -c .)" -ge 2 ] || fail "the session isn't open beside the sidebar"
+shot 07-tablet
+# Narrow again, back from the session goes to its server's sessions (below).
+"$A" shell wm size reset; "$A" shell wm density reset; WIDE=; sleep 2
+
 step "dark theme"
 tap 'desc=Back'; sleep 1
 tap 'desc=More'; sleep 0.5; tap 'text=Settings'; sleep 1
 tap 'text=Dark'; sleep 2
-shot 07-settings-dark
+shot 08-settings-dark
 tap 'text=System'; sleep 2
 "$A" shell input keyevent KEYCODE_BACK; sleep 1
 

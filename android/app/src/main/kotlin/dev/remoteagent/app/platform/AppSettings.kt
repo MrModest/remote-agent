@@ -24,7 +24,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The settings views keep, like @AppStorage: the appearance, text sizes,
- * where the terminal opens, and the choices a new session starts from.
+ * where the terminal opens, the choices a new session starts from, and the
+ * servers the sidebar hides.
  */
 class AppSettings(private val context: Context, private val scope: CoroutineScope) {
     private val store = PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("settings") }
@@ -62,6 +63,8 @@ class AppSettings(private val context: Context, private val scope: CoroutineScop
         fun lastEffort(harness: String) = stringPreferencesKey("lastEffort.$harness")
         fun lastMode(harness: String) = stringPreferencesKey("lastMode.$harness")
         val dictationLanguage = stringPreferencesKey("dictationLanguage")
+        /** The servers whose sessions the tablet's sidebar hides, by id, separated by spaces. */
+        val collapsedServers = stringPreferencesKey("collapsedServers")
     }
 }
 

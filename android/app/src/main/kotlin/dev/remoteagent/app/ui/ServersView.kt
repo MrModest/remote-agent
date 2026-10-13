@@ -94,20 +94,3 @@ private fun ServerRow(connection: ServerConnection, onClick: () -> Unit, onRemov
         }
     }
 }
-
-/** Confirmation before forgetting a server. */
-@Composable
-fun RemoveServerDialog(server: SavedServer?, onDismiss: () -> Unit, onRemove: () -> Unit = {}) {
-    val store = LocalStore.current
-    server ?: return
-    ConfirmDialog(
-        title = "Remove ${server.name}?",
-        message = "This device is unpaired from the server. Run `rad pair` on the computer to add it again.",
-        confirm = "Remove",
-        onConfirm = {
-            onRemove()
-            store.remove(server)
-        },
-        onDismiss = onDismiss,
-    )
-}

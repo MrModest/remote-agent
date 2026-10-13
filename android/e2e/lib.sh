@@ -48,6 +48,15 @@ fill() {
   type_text "$2"
 }
 
+# Hides the keyboard if it is up. A menu opened over it moves once it goes,
+# so the place a dump found for an item can be another item's by the tap.
+hide_keyboard() {
+  if "$A" shell dumpsys input_method | grep -q 'mInputShown=true'; then
+    "$A" shell input keyevent KEYCODE_BACK
+    sleep 0.5
+  fi
+}
+
 shot() { "$A" exec-out screencap -p > "$SHOTS/$1.png"; echo "$SHOTS/$1.png"; }
 
 # Opens a pairing link in the app (the link's & would split the remote shell's command).

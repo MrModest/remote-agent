@@ -199,6 +199,7 @@ fun ConfirmDialog(
     onDismiss: () -> Unit,
     extra: Pair<String, () -> Unit>? = null,
 ) {
+    val cancel: @Composable () -> Unit = { TextButton(onDismiss) { Text("Cancel", color = palette.accent) } }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = palette.mantle,
@@ -209,10 +210,16 @@ fun ConfirmDialog(
         confirmButton = {
             Column(horizontalAlignment = Alignment.End) {
                 TextButton({ onDismiss(); onConfirm() }) { Text(confirm, color = if (destructive) palette.red else palette.accent) }
-                if (extra != null) TextButton({ onDismiss(); extra.second() }) { Text(extra.first, color = palette.red) }
+                if (extra != null) {
+                    TextButton({ onDismiss(); extra.second() }) { Text(extra.first, color = palette.red) }
+                    cancel()
+                }
             }
         },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel", color = palette.accent) } },
+        // With three choices Cancel goes below the others, in the same slot:
+        // AlertDialog lays its buttons out in rows that it reverses without
+        // their offsets, so a row taller than Cancel's would be drawn over it.
+        dismissButton = if (extra == null) cancel else null,
     )
 }
 

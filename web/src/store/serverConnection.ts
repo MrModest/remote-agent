@@ -41,6 +41,8 @@ export class ServerConnection extends Observable implements SessionHost {
   private client: RPCClient;
   private indexSeq = 0;
   private indexLive = false;
+  /** As SessionStore's: index subscriptions not yet synchronized. */
+  private indexOutstanding = 0;
   private indexReplay: Event[] = [];
   private sessionStores = new Map<string, SessionStore>();
   private wanted = false;
@@ -196,7 +198,8 @@ export class ServerConnection extends Observable implements SessionHost {
           this.indexReplay = [];
           for (const ev of buffered) this.upsertIndex(ev);
           this.indexSeq = msg.seq;
-          this.indexLive = true;
+          this.indexOutstanding = Math.max(0, this.indexOutstanding - 1);
+          this.indexLive = this.indexOutstanding === 0;
           this.indexSynced = true;
           for (const [id, s] of this.sessions) {
             const store = this.sessionStores.get(id);
@@ -213,7 +216,8 @@ export class ServerConnection extends Observable implements SessionHost {
         break;
       case "closed":
         this.indexLive = false;
-        for (const s of this.sessionStores.values()) s.live = false;
+        this.indexOutstanding = 0;
+        for (const s of this.sessionStores.values()) s.closed();
         if (this.wanted) {
           this.setState({ kind: "connecting" });
           this.wake?.();
@@ -266,14 +270,19 @@ export class ServerConnection extends Observable implements SessionHost {
   }
 
   private async subscribeIndex() {
+    this.indexOutstanding++;
     this.indexLive = false;
     this.indexReplay = [];
-    await this.client.call("subscribe", { stream: "index", afterSeq: this.indexSeq }).catch(() => {});
+    await this.client.call("subscribe", { stream: "index", afterSeq: this.indexSeq }).catch(() => {
+      this.indexOutstanding = Math.max(0, this.indexOutstanding - 1);
+    });
   }
 
   async subscribe(store: SessionStore) {
     store.beginReplay();
-    await this.client.call("subscribe", { stream: "session:" + store.sessionID, afterSeq: store.lastSeq }).catch(() => {});
+    await this.client
+      .call("subscribe", { stream: "session:" + store.sessionID, afterSeq: store.lastSeq })
+      .catch(() => store.subscriptionFailed());
   }
 
   private async resubscribe(stream: string) {

@@ -38,6 +38,11 @@ export class SessionStore extends Observable {
   /** Replayed events are buffered until `synchronized`, then applied in one
    *  step (after dropping cached state if the server says reset). */
   private replay: Event[] = [];
+  /** Subscriptions asked for and not yet synchronized. Two can overlap (a
+   *  view subscribes as the connection resubscribes everything): only the
+   *  last one's `synchronized` makes the store live, so a newer replay is
+   *  buffered rather than skipped, and its reset can't drop what it replays. */
+  private outstanding = 0;
 
   constructor(
     readonly sessionID: string,
@@ -79,11 +84,24 @@ export class SessionStore extends Observable {
   // Sync
 
   beginReplay() {
+    this.outstanding++;
     this.live = false;
     this.replay = [];
   }
 
+  /** A subscribe call failed: its `synchronized` won't come. */
+  subscriptionFailed() {
+    this.outstanding = Math.max(0, this.outstanding - 1);
+  }
+
+  /** The socket closed: no subscription is outstanding any more. */
+  closed() {
+    this.outstanding = 0;
+    this.live = false;
+  }
+
   synchronized(seq: number, reset: boolean) {
+    this.outstanding = Math.max(0, this.outstanding - 1);
     if (reset) {
       this.turns.clear();
       this.items.clear();
@@ -92,7 +110,7 @@ export class SessionStore extends Observable {
     this.replay = [];
     for (const ev of buffered) this.upsert(ev);
     this.lastSeq = seq;
-    this.live = true;
+    this.live = this.outstanding === 0;
     this.synced = true;
     this.rebuild();
   }

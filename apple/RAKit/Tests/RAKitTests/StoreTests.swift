@@ -39,6 +39,21 @@ struct SessionStoreTests {
         #expect(s.transcript.map(\.id) == ["new"])
     }
 
+    @Test func overlappingSubscriptionsKeepTheLastReplay() throws {
+        let s = SessionStore._testMake("s")
+        // A view subscribes while the connection resubscribes everything.
+        s.beginReplay()
+        s.beginReplay()
+        let replay = [try event(3, item: "b", order: 2, text: "second"), try event(7, item: "a", order: 1, text: "first")]
+        s._testApply(replay)
+        s._testSynchronized(seq: 7, reset: true)
+        #expect(!s.live) // the second subscription hasn't synchronized yet
+        s._testApply(replay)
+        s._testSynchronized(seq: 7, reset: true)
+        #expect(s.live)
+        #expect(s.transcript.map(\.id) == ["a", "b"])
+    }
+
     @Test func gapStopsLiveApply() throws {
         let s = SessionStore._testMake("s")
         s._testSynchronized(seq: 1, reset: true)

@@ -64,6 +64,21 @@ describe("SessionStore", () => {
     expect(s.transcript.map((i) => i.id)).toEqual(["new"]);
   });
 
+  it("keeps the last replay when subscriptions overlap", () => {
+    const s = new SessionStore("s", undefined);
+    // A view subscribes while the connection resubscribes everything.
+    s.beginReplay();
+    s.beginReplay();
+    const replay = [event(3, "b", 2, "second"), event(7, "a", 1, "first")];
+    s.apply(replay);
+    s.synchronized(7, true);
+    expect(s.live).toBe(false); // the second subscription hasn't synchronized yet
+    s.apply(replay);
+    s.synchronized(7, true);
+    expect(s.live).toBe(true);
+    expect(s.transcript.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
   it("resubscribes after a gap", () => {
     const h = host();
     const s = new SessionStore("s", h);

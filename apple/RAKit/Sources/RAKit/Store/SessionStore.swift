@@ -60,12 +60,31 @@ public final class SessionStore {
     /// step (after dropping cached state if the server says reset).
     private var replay: [Event] = []
 
+    /// Subscriptions asked for and not yet synchronized. Two can overlap (a
+    /// view subscribes as the connection resubscribes everything): only the
+    /// last one's `synchronized` makes the store live, so a newer replay is
+    /// buffered rather than skipped, and its reset can't drop what it replays.
+    private var outstanding = 0
+
     func beginReplay() {
+        outstanding += 1
         live = false
         replay = []
     }
 
+    /// A subscribe call failed: its `synchronized` won't come.
+    func subscriptionFailed() {
+        outstanding = max(0, outstanding - 1)
+    }
+
+    /// The socket closed: no subscription is outstanding any more.
+    func closed() {
+        outstanding = 0
+        live = false
+    }
+
     func synchronized(seq: Int64, reset: Bool) {
+        outstanding = max(0, outstanding - 1)
         if reset {
             turns = [:]
             items = [:]
@@ -74,7 +93,7 @@ public final class SessionStore {
         replay = []
         for ev in buffered { upsert(ev) }
         lastSeq = seq
-        live = true
+        live = outstanding == 0
         synced = true
         rebuild()
     }

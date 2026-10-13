@@ -24,6 +24,8 @@ public final class ServerConnection {
     private let client: RPCClient
     private var indexSeq: Int64 = 0
     private var indexLive = false
+    /// As SessionStore's: index subscriptions not yet synchronized.
+    private var indexOutstanding = 0
     @ObservationIgnored private var sessionStores: [String: SessionStore] = [:]
     @ObservationIgnored let drafts: Drafts
     private var wanted = false
@@ -135,7 +137,8 @@ public final class ServerConnection {
                 indexReplay = []
                 for ev in buffered { upsertIndex(ev) }
                 indexSeq = seq
-                indexLive = true
+                indexOutstanding = max(0, indexOutstanding - 1)
+                indexLive = indexOutstanding == 0
                 indexSynced = true
                 for (id, s) in sessions { sessionStores[id]?.session = sessionStores[id]?.session ?? s }
                 drafts.keep { sessions[$0] != nil }
@@ -146,7 +149,8 @@ public final class ServerConnection {
             Task { await resubscribe(stream) }
         case .closed:
             indexLive = false
-            for s in sessionStores.values { s.live = false }
+            indexOutstanding = 0
+            for s in sessionStores.values { s.closed() }
             if wanted { state = .connecting }
         }
     }
@@ -190,14 +194,17 @@ public final class ServerConnection {
     }
 
     private func subscribeIndex() async {
+        indexOutstanding += 1
         indexLive = false
         indexReplay = []
-        let _: SubscribeResult? = try? await client.call("subscribe", SubscribeParams(stream: "index", afterSeq: indexSeq))
+        let res: SubscribeResult? = try? await client.call("subscribe", SubscribeParams(stream: "index", afterSeq: indexSeq))
+        if res == nil { indexOutstanding = max(0, indexOutstanding - 1) }
     }
 
     func subscribe(_ store: SessionStore) async {
         store.beginReplay()
-        let _: SubscribeResult? = try? await client.call("subscribe", SubscribeParams(stream: "session:\(store.sessionID)", afterSeq: store.lastSeq))
+        let res: SubscribeResult? = try? await client.call("subscribe", SubscribeParams(stream: "session:\(store.sessionID)", afterSeq: store.lastSeq))
+        if res == nil { store.subscriptionFailed() }
     }
 
     private func resubscribe(_ stream: String) async {

@@ -57,7 +57,7 @@ Notes for coding agents working on this repo. What the project is and how it is 
 - **Colours:** Catppuccin, Frappé in dark mode and Latte in light mode (`Shared/Views/Palette.swift`). The `AccentColor` asset matches `Palette.accent`.
   - Take colours from `Palette`, not `.red`, `Color.accentColor` or the system backgrounds.
   - Lists and forms set their background with `listBackground(_:)` (forms get it from `compactForm()`). iOS draws each row on the system's background, so the rows need `paletteRows()`: on the rows, or on a `Group` around a form's sections. A list ignores it on itself.
-  - A row background also hides the list's selection, so a list with selection draws it, as the iPad and Mac sidebar does in `ServerHomeView`. On the Mac this also keeps the selection off the system accent.
+  - A row background also hides the list's selection, so a list with selection draws it, as the iPad and Mac sidebar does in `SessionsSidebar`. On the Mac this also keeps the selection off the system accent.
   - `AgentMarkdown` sets `Palette.text` as its foreground style; its block styles take palette colours, and inline styles (code, links) set theirs as text properties.
   - `paletteText()` gives text the palette's colours. Use it on the transcript and list rows, not whole screens: it also overrides the tint of buttons inside.
   - Text on an accent colour, such as a prominent button's label, takes `Palette.onAccent`.
@@ -160,7 +160,7 @@ xcrun simctl spawn booted log show --last 2m --predicate 'subsystem == "dev.remo
 ```
 
 - **Pairing:** the camera and QR scanning don't work in the simulator. Pair with the deep link above. On iPhone the pairing sheet appears on the server list, so go back to the list if a server is open.
-- **iPad:** the app picks its layout by device. iPhone gets the stack in `ServersView`. iPad gets `ServerSplitView`: one server's sessions in the sidebar, the chosen session beside it, and the title menu to switch servers. Both reuse `ServerHomeView` and `SessionView`, so check changes to either on an iPad simulator too, such as `iPad Pro 13-inch (M5)`. With two simulators booted, use the device name in place of `booted`.
+- **iPad:** the app picks its layout by device. iPhone gets the stack in `ServersView`, which pushes a server's sessions (`iOS/ServerHomeView.swift`). iPad gets `ServerSplitView`, as the Mac does: `SessionsSidebar` lists every server's sessions, with the chosen session beside them. Both reuse `SessionRow` and `SessionView`, so check changes to those on an iPad simulator too, such as `iPad Pro 13-inch (M5)`. With two simulators booted, use the device name in place of `booted`.
 - **Speech:** the dictation models don't run in the simulator, so the mic button ends with "The speech model for your language isn't available on this device". The UI states and permission prompts can still be checked there. Two ways to check dictation:
   - On a device.
   - On the Mac: `LiveTranscription.swift` has no UIKit, so a small driver can feed it a recording made with `say -o clip.aiff "…"`, and the Mac's installed dictation models transcribe it. Build the driver with `xcrun swiftc -swift-version 6 -parse-as-library apple/Shared/LiveTranscription.swift driver.swift`.

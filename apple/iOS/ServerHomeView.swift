@@ -1,0 +1,145 @@
+import RAKit
+import SwiftUI
+
+/// A server's sessions on iPhone, pushed from the server list. It pushes
+/// sessions in turn. The iPad has every server's in its sidebar instead.
+struct ServerHomeView: View {
+    let connection: ServerConnection
+    @Environment(\.dismiss) private var dismiss
+    @State private var removing: SavedServer?
+    @State private var showNew = false
+    @State private var openSession: String?
+    @State private var showArchived = false
+    @State private var archiving: ArchiveRequest?
+
+    var body: some View {
+        List { sections }
+            .listStyle(.plain)
+            .listBackground(Palette.base)
+            .overlay {
+                if connection.indexSynced && connection.sessions.isEmpty {
+                    ContentUnavailableView {
+                        Label("No sessions yet", systemImage: "bubble.left.and.text.bubble.right")
+                    } description: {
+                        Text("Start an agent in one of your projects.")
+                    } actions: {
+                        Button { showNew = true } label: {
+                            Text("New session").foregroundStyle(Palette.onAccent)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else if !connection.indexSynced && connection.state == .connecting {
+                    ProgressView("Connecting…")
+                }
+            }
+            .navigationTitle(connection.server.name)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New session", systemImage: "square.and.pencil") { showNew = true }
+                        .keyboardShortcut("n")
+                        .disabled(connection.state != .connected)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Reconnect", systemImage: "arrow.clockwise") { connection.retry() }
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    SettingsButton()
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Remove server", systemImage: "trash", role: .destructive) { removing = connection.server }
+                }
+            }
+            .removeServerDialog($removing) { dismiss() }
+            .sheet(isPresented: $showNew) {
+                NewSessionView(connection: connection) { session in
+                    openSession = session.id
+                }
+                .appStyle()
+            }
+            .archiveSessionDialog($archiving)
+            .refreshable {
+                if connection.state != .connected { connection.retry() }
+                await connection.refreshHarnesses(force: true)
+            }
+            .navigationDestination(item: $openSession) { id in
+                SessionView(connection: connection, store: connection.sessionStore(id))
+            }
+            // Opening a server it gave up on tries again.
+            .task { connection.start() }
+    }
+
+    @ViewBuilder private var sections: some View {
+        switch connection.state {
+        case .failed(let msg):
+            Section {
+                Label(msg, systemImage: "wifi.exclamationmark")
+                    .foregroundStyle(Palette.red)
+                Button("Try again") { connection.retry() }
+            }
+            .scaledFont(.body)
+            .paletteRows()
+        case .connecting where connection.indexSynced:
+            Label("Reconnecting…", systemImage: "arrow.triangle.2.circlepath")
+                .scaledFont(.body)
+                .foregroundStyle(.secondary)
+                .paletteRows()
+        default:
+            EmptyView()
+        }
+
+        let active = connection.activeSessions
+        let attention = active.filter { $0.status == .awaitingApproval }
+        if !attention.isEmpty {
+            Section {
+                ForEach(attention) { row($0) }
+            } header: {
+                Text("Needs you").listHeaderStyle()
+            }
+        }
+        Section {
+            ForEach(active.filter { $0.status != .awaitingApproval }) { row($0) }
+        } header: {
+            Text("Sessions").listHeaderStyle()
+        }
+        let archived = connection.archivedSessions
+        if !archived.isEmpty {
+            Section(isExpanded: $showArchived) {
+                ForEach(archived) { row($0) }
+            } header: {
+                // Plain lists have no disclosure control of their own.
+                Button {
+                    withAnimation { showArchived.toggle() }
+                } label: {
+                    HStack {
+                        Text("Archived")
+                        Text("\(archived.count)").foregroundStyle(.tertiary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .rotationEffect(.degrees(showArchived ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func row(_ s: Session) -> some View {
+        NavigationLink(value: SessionRoute(serverID: connection.server.id, sessionID: s.id)) {
+            SessionRow(session: s, project: connection.projects[s.projectId], harness: connection.harness(s.harness))
+        }
+        .listRowInsets(Metrics.rowInsets)
+        .listRowBackground(Palette.base)
+        .swipeActions {
+            if !s.archived {
+                Button("Archive", systemImage: "archivebox") { archiving = ArchiveRequest(session: s, connection: connection) }
+                    .tint(Palette.blue)
+            }
+        }
+        .contextMenu {
+            if !s.archived {
+                Button("Archive…", systemImage: "archivebox") { archiving = ArchiveRequest(session: s, connection: connection) }
+            }
+        }
+    }
+}

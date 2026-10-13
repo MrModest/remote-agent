@@ -3,7 +3,7 @@
 Drive coding agents running on your computer from your iPhone, iPad, Mac, an Android phone or tablet, or a browser.
 
 - **`rad`**: a Go server that runs on the dev machine. It spawns agent CLIs as child processes, normalizes what they do into one event model, persists it in SQLite, and serves it over a WebSocket.
-- **Remote Agent**: a native SwiftUI app for iPhone, iPad and Mac. You pair it by QR code, or on the Mac by pasting a link. On iPad and Mac, a server's sessions stay in a sidebar next to the one you have open. From the app you can:
+- **Remote Agent**: a native SwiftUI app for iPhone, iPad and Mac. You pair it by QR code, or on the Mac by pasting a link. On iPad and Mac, one sidebar lists every server's sessions next to the one you have open. From the app you can:
   - start sessions in any project
   - watch agents stream their work
   - dictate prompts, in any of your keyboard languages
@@ -191,7 +191,7 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build or release read the pairing tokens it saved in your keychain.
 3. Pair it: run `server/bin/rad pair`, then paste the link in **File › Pair a Server…**. When rad runs on the same Mac, `open "$(server/bin/rad pair --print-url)"` opens the link in the app.
 
-On the Mac, ⌘N starts a session and ⌥⌘N opens another window. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The server menu at the foot of the sidebar switches servers, each back to the session you had open on it, and the app opens again on the session you had open last. View › Group Sessions By, or the button above the sidebar, groups the sessions by status, by project, or not at all. Grouped by project, the + beside a project's name starts a session in it. Dictation listens in your preferred languages from System Settings.
+On the Mac, ⌘N starts a session on the server of the one you have open; the arrow beside the New Session button, or the + beside a server's name, starts one on another server. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The sidebar lists every paired server with its sessions, those waiting for you first. Click a server's name to hide or show its sessions; right-click it to reconnect or remove it. The app has one window, which opens again on the session you had open last. Dictation listens in your preferred languages from System Settings.
 
 ## Installing the app on Android
 
@@ -255,9 +255,9 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
   - On the Mac, iPad and the web client in a wide window, Settings › Terminal picks where it opens: instead of the messages, below them, or in a sidebar on the right. On an iPhone, or in a narrow window, it takes the place of the messages.
   - ⌘J or ⌘` shows and hides it, with a keyboard on iPad too; hiding it puts you back in the prompt. In the web client Ctrl works as well, except inside the terminal, where Ctrl+J and Ctrl+` go to the shell.
   - On iPhone and iPad, the bar above the keyboard has Esc, Ctrl, Tab and the arrow keys; the web client shows similar keys on touch screens.
-- **Connection:** when a server can't be reached, the apps try five times, over about 15 seconds, then stop and show why. Retrying, opening the server or coming back to the app tries again.
+- **Connection:** when a server can't be reached, the apps try five times, over about 15 seconds, then stop and show why. Retrying, opening the server, or on iPad and the Mac a click on its name tries again, and so does coming back to the app.
 - **Stop:** this interrupts the current turn. *Force stop* kills the agent process. Idle agents are stopped after `idle_timeout` and resume transparently on the next prompt.
-- **Text size:** Settings has two sizes: one for the interface, such as lists and labels, and one for messages: your prompts, the agent's replies and its tool calls. On the Mac it is under Remote Agent › Settings… (⌘,). On iPhone and iPad, tap the gear on the server list or open a server's ⋯ menu. On iOS the interface follows the system's text size until you turn off **Match System**.
+- **Text size:** Settings has two sizes: one for the interface, such as lists and labels, and one for messages: your prompts, the agent's replies and its tool calls. On the Mac it is under Remote Agent › Settings… (⌘,). On iPhone, tap the gear on the server list or open a server's ⋯ menu; on iPad, open the ⋯ menu above the sidebar. On iOS the interface follows the system's text size until you turn off **Match System**.
   - On the Mac, Settings also picks the messages' font, from the system font's designs or any installed family, and a code font from the installed fixed-width ones. The code font is used for code in messages, tool calls and diffs.
 - **Colours:** the apps use [Catppuccin](https://catppuccin.com): Frappé in dark mode, Latte in light mode, with mauve as the accent. They follow the system's appearance, or Settings › Theme keeps them light or dark.
 

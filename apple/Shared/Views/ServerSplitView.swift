@@ -8,9 +8,11 @@ import SwiftUI
 struct ServerSplitView: View {
     @Environment(ServerStore.self) private var store
     @Binding var pendingLink: PairingLink?
-    // Kept per window, so each window has its own server and session.
-    @SceneStorage("server") private var serverID = ""
-    @SceneStorage("session") private var sessionID = ""
+    // Kept per window, so each window has its own server and session. One
+    // value, so the two change together: of two values set at once, the view
+    // can see one a render before the other.
+    @SceneStorage("place") private var place = WindowPlace()
+    @State private var window = UUID()
     @State private var showAdd = false
     #if os(macOS)
     @State private var removing: SavedServer?
@@ -18,14 +20,22 @@ struct ServerSplitView: View {
 
     /// The chosen server, or the first one if it was removed.
     private var server: SavedServer? {
-        store.servers.first { $0.id == serverID } ?? store.servers.first
+        store.servers.first { $0.id == place.server } ?? store.servers.first
     }
 
     /// The open session. A session saved for a server that was removed since
     /// doesn't carry over to the server shown in its place.
     private var openSession: String? {
-        guard let server, server.id == serverID, !sessionID.isEmpty else { return nil }
-        return sessionID
+        guard let server, server.id == place.server, !place.session.isEmpty else { return nil }
+        return place.session
+    }
+
+    /// The open session is no longer on the server. Only the synced index can
+    /// tell: before it, every session looks missing.
+    private var openSessionGone: Bool {
+        guard let server, let id = openSession else { return false }
+        let connection = store.connection(for: server)
+        return connection.indexSynced && connection.sessions[id] == nil
     }
 
     var body: some View {
@@ -44,7 +54,7 @@ struct ServerSplitView: View {
         }
         .sheet(isPresented: $showAdd) {
             AddServerView(initialLink: pendingLink) { server in
-                serverID = server.id
+                show(server: server.id)
             }
             .appStyle()
         }
@@ -54,8 +64,19 @@ struct ServerSplitView: View {
         .onChange(of: showAdd) { _, shown in
             if !shown { pendingLink = nil }
         }
-        .onChange(of: server?.id) {
-            sessionID = ""
+        .onAppear(perform: restore)
+        .onDisappear { LastSession.windows.remove(window) }
+        .onChange(of: server?.id) { _, id in
+            // The window's server was removed, or it had none: another one takes its place.
+            if id != place.server { show(server: id) }
+        }
+        .onChange(of: openSessionGone, initial: true) { _, gone in
+            // Landing on a session that is gone shows nothing rather than an error.
+            guard gone, let server else { return }
+            if LastSession.session(on: server.id) == place.session {
+                LastSession.set(nil, on: server.id, servers: store.servers)
+            }
+            place.session = ""
         }
         #if os(macOS)
         .removeServerDialog($removing)
@@ -90,7 +111,7 @@ struct ServerSplitView: View {
     }
 
     @ViewBuilder private var serverMenu: some View {
-        Picker("Server", selection: Binding(get: { server?.id ?? "" }, set: { serverID = $0 })) {
+        Picker("Server", selection: Binding(get: { server?.id ?? "" }, set: { show(server: $0) })) {
             ForEach(store.servers) { s in
                 Text(s.name).tag(s.id)
             }
@@ -138,22 +159,39 @@ struct ServerSplitView: View {
         Binding {
             openSession.map { SessionRoute(serverID: server.id, sessionID: $0) }
         } set: { route in
-            serverID = server.id
-            sessionID = route?.sessionID ?? ""
+            place = WindowPlace(server: server.id, session: route?.sessionID ?? "")
+            LastSession.set(route?.sessionID, on: server.id, servers: store.servers)
         }
     }
 
+    /// A window with no server of its own to restore opens on the server used
+    /// last. When it is the only window, it also opens the session that was
+    /// open there: the Mac doesn't restore the windows it closes, on quit or
+    /// otherwise. A window beside others starts with no session open.
+    private func restore() {
+        let alone = LastSession.windows.subtracting([window]).isEmpty
+        LastSession.windows.insert(window)
+        guard server?.id != place.server else { return }
+        let last = (store.servers.first { $0.id == LastSession.server } ?? server)?.id
+        if alone {
+            show(server: last)
+        } else {
+            place = WindowPlace(server: last ?? "")
+        }
+    }
+
+    /// Shows the server's sessions, and the session that was open on it last.
+    private func show(server id: String?) {
+        place = WindowPlace(server: id ?? "", session: id.flatMap(LastSession.session(on:)) ?? "")
+        if let id { LastSession.server = id }
+    }
+
     @ViewBuilder private var detail: some View {
-        if let server, let sessionID = openSession {
+        if let server, let sessionID = openSession, !openSessionGone {
             let connection = store.connection(for: server)
-            if connection.indexSynced, connection.sessions[sessionID] == nil {
-                ContentUnavailableView("Session not found", systemImage: "questionmark.bubble",
-                                       description: Text("It is no longer on \(server.name)."))
-            } else {
-                // A new identity per session, so the attachments and the subscription don't carry over.
-                SessionView(connection: connection, store: connection.sessionStore(sessionID))
-                    .id(sessionID)
-            }
+            // A new identity per session, so the attachments and the subscription don't carry over.
+            SessionView(connection: connection, store: connection.sessionStore(sessionID))
+                .id(sessionID)
         } else if store.servers.isEmpty {
             ContentUnavailableView {
                 Label("No servers", systemImage: "desktopcomputer")
@@ -177,5 +215,55 @@ struct ServerSplitView: View {
                 .navigationTitle(server?.name ?? "")
                 #endif
         }
+    }
+}
+
+/// A window's server, and the session open in it ("" for none).
+private struct WindowPlace: RawRepresentable {
+    var server = ""
+    var session = ""
+
+    init(server: String = "", session: String = "") {
+        self.server = server
+        self.session = session
+    }
+
+    init?(rawValue: String) {
+        let ids = rawValue.split(separator: " ", omittingEmptySubsequences: false)
+        guard ids.count == 2 else { return nil }
+        server = String(ids[0])
+        session = String(ids[1])
+    }
+
+    var rawValue: String { server + " " + session }
+}
+
+/// The server used last, and the session open last on each server, which a
+/// window goes back to. Kept in UserDefaults, so they outlast the app.
+@MainActor
+private enum LastSession {
+    /// The windows open now.
+    static var windows: Set<UUID> = []
+
+    static var server: String? {
+        get { UserDefaults.standard.string(forKey: "lastServer") }
+        set { UserDefaults.standard.set(newValue, forKey: "lastServer") }
+    }
+
+    static func session(on server: String) -> String? {
+        sessions[server]
+    }
+
+    /// Remembers the session open on `server`, nil for none, and forgets
+    /// the servers that are no longer in `servers`.
+    static func set(_ session: String?, on server: String, servers: [SavedServer]) {
+        var all = sessions.filter { id, _ in servers.contains { $0.id == id } }
+        all[server] = session
+        UserDefaults.standard.set(all, forKey: "lastSessions")
+        Self.server = server
+    }
+
+    private static var sessions: [String: String] {
+        UserDefaults.standard.dictionary(forKey: "lastSessions") as? [String: String] ?? [:]
     }
 }

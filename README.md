@@ -191,7 +191,7 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build or release read the pairing tokens it saved in your keychain.
 3. Pair it: run `server/bin/rad pair`, then paste the link in **File › Pair a Server…**. When rad runs on the same Mac, `open "$(server/bin/rad pair --print-url)"` opens the link in the app.
 
-On the Mac, ⌘N starts a session and ⌥⌘N opens another window. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The server menu at the foot of the sidebar switches servers. View › Group Sessions By, or the button above the sidebar, groups the sessions by status, by project, or not at all. Grouped by project, the + beside a project's name starts a session in it. Dictation listens in your preferred languages from System Settings.
+On the Mac, ⌘N starts a session and ⌥⌘N opens another window. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The server menu at the foot of the sidebar switches servers, each back to the session you had open on it, and the app opens again on the session you had open last. View › Group Sessions By, or the button above the sidebar, groups the sessions by status, by project, or not at all. Grouped by project, the + beside a project's name starts a session in it. Dictation listens in your preferred languages from System Settings.
 
 ## Installing the app on Android
 

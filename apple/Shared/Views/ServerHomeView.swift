@@ -114,6 +114,12 @@ struct ServerHomeView: View {
             SessionView(connection: connection, store: connection.sessionStore(id))
         }
         .task { connection.start() }
+        .onChange(of: connection.indexSynced, initial: true) { _, synced in
+            // Landing on an archived session, such as the one open last, shows its row.
+            if synced, let id = selection?.wrappedValue?.sessionID, connection.sessions[id]?.archived == true {
+                showArchived = true
+            }
+        }
     }
 
     /// For File › New Session, which starts in the project used last.

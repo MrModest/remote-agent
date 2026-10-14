@@ -236,12 +236,15 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
         run { store.send(command.prompt) }
     }
 
+    // A footer after the last item of each interrupted or failed turn. A prompt
+    // queued during a turn sits among its items, so the last is looked up.
     val rows = remember(transcript, turns) {
+        val last = buildMap { transcript.forEachIndexed { i, item -> item.turnId?.let { put(it, i) } } }
         buildList<Row> {
             transcript.forEachIndexed { i, item ->
                 add(Row.ItemRow(item))
                 val tid = item.turnId
-                if (tid != null && transcript.getOrNull(i + 1)?.turnId != tid) {
+                if (tid != null && last[tid] == i) {
                     turns[tid]?.takeIf { it.status == TurnStatus.INTERRUPTED || it.status == TurnStatus.FAILED }?.let { add(Row.Footer(it)) }
                 }
             }

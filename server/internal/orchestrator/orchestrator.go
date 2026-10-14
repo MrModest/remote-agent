@@ -283,6 +283,16 @@ func (o *Orchestrator) Interrupt(ctx context.Context, sessionID string, force bo
 	return a.interrupt(ctx, force)
 }
 
+// SendNow interrupts the running turn so that the queued prompt itemID
+// starts next.
+func (o *Orchestrator) SendNow(ctx context.Context, sessionID, itemID string) error {
+	a, err := o.actor(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return a.sendNow(ctx, itemID)
+}
+
 func (o *Orchestrator) Respond(ctx context.Context, sessionID, approvalID string, r harness.Response, commandID string) error {
 	a, err := o.actor(ctx, sessionID)
 	if err != nil {

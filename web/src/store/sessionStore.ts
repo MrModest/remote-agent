@@ -230,6 +230,19 @@ export class SessionStore extends Observable {
     await this.c.call("session.interrupt", { sessionId: this.sessionID, force });
   }
 
+  /** Interrupts the running turn and starts the next one with this queued
+   *  prompt, ahead of the others. */
+  async sendNow(itemId: string) {
+    try {
+      await this.c.call("session.sendNow", { sessionId: this.sessionID, itemId });
+    } catch (e) {
+      if (e instanceof RPCError && e.code === "method_not_found") {
+        throw new RPCError("method_not_found", "This server's rad is too old to send a queued prompt now. Update rad on it.");
+      }
+      throw e;
+    }
+  }
+
   async respond(approval: Item, optionId: string, message?: string, answers?: Record<string, string>) {
     await this.c.call("approval.respond", {
       commandId: crypto.randomUUID(),

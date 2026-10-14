@@ -43,6 +43,7 @@ type actor struct {
 	turn      *model.Turn
 	lastTurnN int
 	queue     []queuedPrompt
+	holds     int    // sendNow calls interrupting the turn; the queue waits for them
 	note      string // prepended to the next prompt (e.g. after a revert)
 
 	keyToID   map[string]string          // adapter item key -> item id (per runtime)
@@ -135,9 +136,10 @@ func (a *actor) prompt(ctx context.Context, text string, refs []model.ImageRef, 
 	if len(refs) > 0 {
 		attrs = append(attrs, "images", len(refs))
 	}
-	a.o.log.Info("prompt", a.logAttrs(append(attrs, "queued", a.turn != nil, "device", clientOf(ctx))...)...)
+	busy := a.turn != nil || a.holds > 0
+	a.o.log.Info("prompt", a.logAttrs(append(attrs, "queued", busy, "device", clientOf(ctx))...)...)
 	q := queuedPrompt{it, harness.Input{Text: text, Images: files}, time.Now()}
-	if a.turn != nil {
+	if busy {
 		a.queue = append(a.queue, q)
 		cp := *it // the queued item is updated when its turn starts
 		return &cp, nil
@@ -609,11 +611,20 @@ func (a *actor) endTurn(ctx context.Context, ev harness.TurnEnded) {
 		return a.putSession(w)
 	})
 	a.items = carried
-	if len(a.queue) > 0 && a.rt != nil {
-		next := a.queue[0]
-		a.queue = a.queue[1:]
-		a.startTurn(ctx, next)
+	if a.rt != nil { // else the agent exited, which cancels the queue
+		a.startNext(ctx)
 	}
+}
+
+// startNext starts the first queued prompt, unless a turn is running or a
+// sendNow is still interrupting one.
+func (a *actor) startNext(ctx context.Context) {
+	if len(a.queue) == 0 || a.turn != nil || a.holds > 0 {
+		return
+	}
+	next := a.queue[0]
+	a.queue = a.queue[1:]
+	a.startTurn(ctx, next)
 }
 
 func open(it *model.Item) bool {
@@ -759,6 +770,34 @@ func (a *actor) interrupt(ctx context.Context, force bool) error {
 	rt := a.rt
 	a.mu.Unlock()
 	return rt.Interrupt(ctx)
+}
+
+// sendNow moves the queued prompt itemID to the front of the queue and
+// interrupts the running turn, so that the prompt starts next. Once the
+// prompt has left the queue, it does nothing.
+func (a *actor) sendNow(ctx context.Context, itemID string) error {
+	a.mu.Lock()
+	i := slices.IndexFunc(a.queue, func(q queuedPrompt) bool { return q.item.ID == itemID })
+	if i < 0 || a.rt == nil {
+		a.mu.Unlock()
+		return nil
+	}
+	q := a.queue[i]
+	a.queue = slices.Insert(slices.Delete(a.queue, i, i+1), 0, q)
+	a.o.log.Info("send now", "session", a.sess.ID, "waited", time.Since(q.queuedAt).Round(time.Millisecond), "device", clientOf(ctx))
+	// The turn may end on its own before the agent gets the interrupt. The
+	// prompt then waits for the interrupt, which would otherwise stop it.
+	a.holds++
+	rt := a.rt
+	a.mu.Unlock()
+	err := rt.Interrupt(ctx)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.holds--
+	// If the agent exited meanwhile, what is queued came after: it starts
+	// the agent again, as it would have in an idle session.
+	a.startNext(ctx)
+	return err
 }
 
 func (a *actor) setMode(ctx context.Context, mode string) error {

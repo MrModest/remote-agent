@@ -21,13 +21,21 @@ import type { ImageRef, Item, JSONValue, Plan, Turn } from "../../protocol/model
 import type { SessionStore } from "../../store/sessionStore";
 import { ImageGallery } from "../images";
 import { Markdown } from "../Markdown";
-import { Spinner } from "../primitives";
+import { ErrorAlert, Spinner } from "../primitives";
 import { ApprovalView } from "./ApprovalView";
 
 export function ItemView({ item, store }: { item: Item; store: SessionStore }) {
   switch (item.kind) {
     case "user_message":
-      return <UserBubble text={item.text ?? ""} images={item.images ?? []} pending={item.status === "queued"} cancelled={item.status === "cancelled"} />;
+      return (
+        <UserBubble
+          text={item.text ?? ""}
+          images={item.images ?? []}
+          pending={item.status === "queued"}
+          cancelled={item.status === "cancelled"}
+          onSendNow={item.status === "queued" ? () => store.sendNow(item.id) : undefined}
+        />
+      );
     case "assistant_message":
       return (
         <div className="assistant">
@@ -55,7 +63,21 @@ export function ItemView({ item, store }: { item: Item; store: SessionStore }) {
   }
 }
 
-export function UserBubble({ text, images = [], pending = false, cancelled = false }: { text: string; images?: ImageRef[]; pending?: boolean; cancelled?: boolean }) {
+/** A prompt. Queued on the server, it offers to send it now; in the outbox
+ *  (`pending` without `onSendNow`) it only waits. */
+export function UserBubble({
+  text,
+  images = [],
+  pending = false,
+  cancelled = false,
+  onSendNow,
+}: {
+  text: string;
+  images?: ImageRef[];
+  pending?: boolean;
+  cancelled?: boolean;
+  onSendNow?: () => Promise<void>;
+}) {
   const faded = pending || cancelled;
   return (
     <div className="user-message">
@@ -69,9 +91,36 @@ export function UserBubble({ text, images = [], pending = false, cancelled = fal
           {text}
         </div>
       )}
-      {pending && <div className="bubble-note">Queued</div>}
+      {pending && (onSendNow ? <QueuedNote onSendNow={onSendNow} /> : <div className="bubble-note">Queued</div>)}
       {cancelled && <div className="bubble-note">Not sent</div>}
     </div>
+  );
+}
+
+/** "Queued · Send now": stops the running turn and sends this prompt next. */
+function QueuedNote({ onSendNow }: { onSendNow: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const sendNow = async () => {
+    setBusy(true);
+    try {
+      await onSendNow();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="bubble-note">
+        Queued ·{" "}
+        <button className="link" onClick={() => void sendNow()} disabled={busy} title="Stop the current turn and send this prompt now" aria-label="Send now">
+          Send now
+        </button>
+      </div>
+      <ErrorAlert error={error} onClose={() => setError(undefined)} />
+    </>
   );
 }
 

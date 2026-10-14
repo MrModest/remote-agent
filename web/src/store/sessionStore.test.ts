@@ -1,6 +1,7 @@
 // As apple/RAKit/Tests/RAKitTests/StoreTests.swift.
 import { describe, expect, it, vi } from "vitest";
 import type { Event, Item } from "../protocol/models";
+import { RPCError } from "../protocol/rpc";
 import { SessionStore, type SessionHost } from "./sessionStore";
 
 function event(seq: number, id: string, order: number, text: string, kind = "assistant_message", parent?: string): Event {
@@ -132,5 +133,26 @@ describe("SessionStore", () => {
     const s = new SessionStore("s", h);
     await expect(s.send("hello")).rejects.toThrow("nope");
     expect(s.outbox.size).toBe(0);
+  });
+
+  it("sends a queued prompt now", async () => {
+    const h = host();
+    const s = new SessionStore("s", h);
+    await s.sendNow("u");
+    expect(h.calls).toEqual([["session.sendNow", { sessionId: "s", itemId: "u" }]]);
+  });
+
+  it("says when rad is too old to send a queued prompt now", async () => {
+    const h = host();
+    h.call = async () => {
+      throw new RPCError("method_not_found", "unknown method session.sendNow");
+    };
+    const s = new SessionStore("s", h);
+    await expect(s.sendNow("u")).rejects.toThrow("This server's rad is too old to send a queued prompt now. Update rad on it.");
+    // Other errors pass through.
+    h.call = async () => {
+      throw new RPCError("not_found", "no such item");
+    };
+    await expect(s.sendNow("u")).rejects.toThrow("no such item");
   });
 });

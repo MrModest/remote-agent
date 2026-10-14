@@ -570,6 +570,11 @@ func TestSessionOverWebSocket(t *testing.T) {
 	if _, e := c.call("session.prompt", map[string]any{"sessionId": "missing", "text": "hi"}); e == nil || e.Code != "not_found" {
 		t.Errorf("unknown session: %+v", e)
 	}
+	if _, e := c.call("session.sendNow", map[string]any{"sessionId": "missing", "itemId": "x"}); e == nil || e.Code != "not_found" {
+		t.Errorf("send now in an unknown session: %+v", e)
+	}
+	// A prompt no longer queued is sent already.
+	c.mustCall("session.sendNow", map[string]any{"sessionId": sess.ID, "itemId": user}, nil)
 	if _, e := c.call("session.prompt", "not an object"); e == nil || e.Code != "invalid" {
 		t.Errorf("bad params: %+v", e)
 	}

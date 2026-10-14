@@ -684,6 +684,108 @@ func TestInterrupt(t *testing.T) {
 	}
 }
 
+func TestSendNow(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, false)
+	s := e.create(CreateSessionParams{Prompt: "slow reply with quite a few words in it"})
+	e.waitFor("streaming", func() bool { return len(byKind(e.items(s.ID), model.ItemAssistantMessage)) == 1 })
+	first := e.prompt(s.ID, "first", "")
+	second := e.prompt(s.ID, "second", "")
+	if err := e.o.SendNow(bg, s.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if turn := e.waitTurn(s.ID, 1); turn.Status != model.TurnInterrupted {
+		t.Errorf("turn 1 = %s", turn.Status)
+	}
+	// The prompt sent now goes first; the other stays queued behind it.
+	e.waitTurn(s.ID, 3)
+	turns := e.turns(s.ID)
+	items := e.items(s.ID)
+	for _, it := range items {
+		if it.ID == second.ID && it.TurnID != turns[1].ID || it.ID == first.ID && it.TurnID != turns[2].ID {
+			t.Errorf("%q ran in the wrong turn: %+v", it.Text, it)
+		}
+	}
+	if turns[1].Status != model.TurnCompleted || turns[2].Status != model.TurnCompleted {
+		t.Errorf("turns = %+v", turns)
+	}
+	checkOrder(t, items, turns)
+	if !strings.Contains(e.log.String(), `msg="send now"`) {
+		t.Errorf("log:\n%s", e.log.String())
+	}
+
+	// A prompt that has left the queue is sent already: nothing happens.
+	if err := e.o.SendNow(bg, s.ID, first.ID); err != nil {
+		t.Error(err)
+	}
+	if n := len(e.turns(s.ID)); n != 3 {
+		t.Errorf("turns = %d", n)
+	}
+}
+
+// slowInterrupt is the fake harness with an Interrupt that returns only when
+// released, as an agent's reply to it can come after the turn has ended.
+type slowInterrupt struct {
+	fake.Harness
+	release chan struct{}
+}
+
+func (h slowInterrupt) Open(ctx context.Context, o harness.OpenOptions) (harness.Runtime, error) {
+	rt, err := h.Harness.Open(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	return slowInterruptRuntime{rt, h.release}, nil
+}
+
+type slowInterruptRuntime struct {
+	harness.Runtime
+	release chan struct{}
+}
+
+func (r slowInterruptRuntime) Interrupt(ctx context.Context) error {
+	err := r.Runtime.Interrupt(ctx)
+	<-r.release
+	return err
+}
+
+func TestSendNowWaitsForInterrupt(t *testing.T) {
+	t.Parallel()
+	h := slowInterrupt{release: make(chan struct{})}
+	e := newEnvAt(t, t.TempDir(), false, h)
+	s := e.create(CreateSessionParams{Prompt: "slow reply with quite a few words in it"})
+	e.waitFor("streaming", func() bool { return len(byKind(e.items(s.ID), model.ItemAssistantMessage)) == 1 })
+	next := e.prompt(s.ID, "next", "")
+	done := make(chan error)
+	go func() { done <- e.o.SendNow(bg, s.ID, next.ID) }()
+	e.waitFor("turn 1 to end", func() bool { return e.turns(s.ID)[0].Status == model.TurnInterrupted })
+
+	// Until the interrupt returns, a turn started now could be the one it
+	// stops: the queue waits, and a new prompt joins it.
+	after := e.prompt(s.ID, "after", "")
+	if after.Status != model.ItemQueued {
+		t.Errorf("prompt while interrupting = %s", after.Status)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := len(e.turns(s.ID)); n != 1 {
+		t.Fatalf("a turn started during the interrupt (%d turns)", n)
+	}
+	close(h.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	e.waitTurn(s.ID, 3)
+	turns := e.turns(s.ID)
+	for _, it := range e.items(s.ID) {
+		if it.ID == next.ID && it.TurnID != turns[1].ID || it.ID == after.ID && it.TurnID != turns[2].ID {
+			t.Errorf("%q ran in the wrong turn: %+v", it.Text, it)
+		}
+	}
+	if turns[1].Status != model.TurnCompleted || turns[2].Status != model.TurnCompleted {
+		t.Errorf("turns = %+v", turns)
+	}
+}
+
 func TestForceInterruptRestartsRuntime(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, false)

@@ -223,6 +223,7 @@ Approval {
 | `session.create` | `{commandId, projectId, harness, model?, effort?, mode?, workspace: {kind, branch?, baseRef?}, prompt?, images?, title?}` | `Session` |
 | `session.prompt` | `{commandId, sessionId, text, images?}` | `Item` (the user message; `queued` if a turn is running) |
 | `session.interrupt` | `{sessionId, force?}` | `{}` (`force` kills the agent process) |
+| `session.sendNow` | `{sessionId, itemId}` | `{}` (see below) |
 | `session.setMode` | `{sessionId, mode}` | `{}` |
 | `session.archive` | `{sessionId, removeWorktree?}` | `{}` (also ends the session's shell) |
 | `approval.respond` | `{commandId, sessionId, approvalId, optionId, message?, answers?}` | `{}` |
@@ -249,6 +250,7 @@ FileStat { path, oldPath?, status: "added"|"modified"|"deleted"|"renamed", addit
 ```
 
 - **Slash commands.** A prompt of `/<name>`, optionally followed by text for the command, runs the command; send it with `session.prompt` like any other. Its turn has the prompt as its user message and, for `/compact`, a `notice` item once the agent has summarized the conversation; the session's `context` then drops. The harness's `commands` are the ones the apps offer in a menu; others typed in a prompt go to the agent as they are.
+- **Queued prompts.** A prompt sent while a turn runs waits as a `queued` user message, and the next turn starts with it once the turn ends. Interrupting the turn cancels every queued prompt. `session.sendNow` sends one of them at once instead: rad interrupts the turn and starts the next turn with that prompt, ahead of the others, which stay queued behind it. A prompt no longer queued (it started, or was cancelled) is left as it is.
 - **Images in prompts.** `images` lists ids from `POST /v1/images`. A prompt needs text, images or both. An unknown id is `invalid`.
 - **Approval answers.** For a `question` approval, put `answers` (question text → chosen label; join multiple labels with `", "`) in the request, along with the option of kind `allow_once`.
 - **Deny reasons.** For a deny, `message` is passed to the agent where the harness supports it.

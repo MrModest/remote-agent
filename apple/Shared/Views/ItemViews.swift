@@ -9,7 +9,8 @@ struct ItemView: View {
         switch item.kind {
         case .userMessage:
             UserBubble(text: item.text ?? "", images: item.images ?? [], store: store,
-                       pending: item.status == .queued, cancelled: item.status == .cancelled)
+                       pending: item.status == .queued, cancelled: item.status == .cancelled,
+                       sendNow: item.status == .queued ? { try await store.sendNow(item) } : nil)
         case .assistantMessage:
             AgentMarkdown(text: item.text ?? "", images: item.images ?? [], store: store)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -43,6 +44,10 @@ struct UserBubble: View {
     var store: SessionStore?
     var pending = false
     var cancelled = false
+    /// Sends a queued prompt at once, stopping the turn it waits for.
+    var sendNow: (() async throws -> Void)?
+    @State private var sending = false
+    @State private var error: String?
 
     var body: some View {
         HStack {
@@ -63,11 +68,34 @@ struct UserBubble: View {
                         .background(Palette.accent.opacity(pending || cancelled ? 0.55 : 1), in: RoundedRectangle(cornerRadius: Metrics.Corner.bubble))
                 }
                 if pending {
-                    Text("Queued").scaledFont(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Queued")
+                        if let sendNow {
+                            Text("·")
+                            Button("Send now") { send(sendNow) }
+                                .buttonStyle(.borderless)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Palette.accent)
+                                .disabled(sending)
+                                .help("Stop the current turn and send this prompt now")
+                        }
+                    }
+                    .scaledFont(.caption2)
+                    .foregroundStyle(.secondary)
                 } else if cancelled {
                     Text("Not sent").scaledFont(.caption2).foregroundStyle(.secondary)
                 }
+                if let error { Text(error).scaledFont(.caption2).foregroundStyle(Palette.red) }
             }
+        }
+    }
+
+    private func send(_ f: @escaping () async throws -> Void) {
+        sending = true
+        error = nil
+        Task {
+            defer { sending = false }
+            do { try await f() } catch { self.error = error.localizedDescription }
         }
     }
 }

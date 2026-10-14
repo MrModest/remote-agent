@@ -60,6 +60,11 @@ type interruptParams struct {
 	Force     bool   `json:"force"`
 }
 
+type sendNowParams struct {
+	SessionID string `json:"sessionId"`
+	ItemID    string `json:"itemId"`
+}
+
 type setModeParams struct {
 	SessionID string `json:"sessionId"`
 	Mode      string `json:"mode"`
@@ -161,6 +166,9 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 
 	case "session.interrupt":
 		return call(raw, func(p interruptParams) (any, error) { return nil, o.Interrupt(ctx, p.SessionID, p.Force) })
+
+	case "session.sendNow":
+		return call(raw, func(p sendNowParams) (any, error) { return nil, o.SendNow(ctx, p.SessionID, p.ItemID) })
 
 	case "session.setMode":
 		return call(raw, func(p setModeParams) (any, error) { return nil, o.SetMode(ctx, p.SessionID, p.Mode) })

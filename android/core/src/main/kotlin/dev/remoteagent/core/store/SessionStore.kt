@@ -249,6 +249,19 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
         c.callRaw("session.interrupt", params("sessionId" to sessionID, "force" to force))
     }
 
+    /**
+     * Sends a queued prompt at once: rad interrupts the running turn and
+     * starts the next one with it, ahead of the other queued prompts.
+     */
+    suspend fun sendNow(itemId: String) {
+        try {
+            c.callRaw("session.sendNow", params("sessionId" to sessionID, "itemId" to itemId))
+        } catch (e: RpcError) {
+            if (e.code != "method_not_found") throw e
+            throw RpcError(e.code, "This server's rad is too old to send a queued prompt now. Update rad on it.")
+        }
+    }
+
     suspend fun respond(approval: Item, option: ApprovalOption, message: String? = null, answers: Map<String, String>? = null) {
         c.callRaw(
             "approval.respond",

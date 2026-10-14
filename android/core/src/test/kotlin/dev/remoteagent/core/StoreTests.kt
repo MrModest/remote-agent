@@ -1,6 +1,8 @@
 package dev.remoteagent.core
 
 import dev.remoteagent.core.net.PairingLink
+import dev.remoteagent.core.net.RpcError
+import dev.remoteagent.core.net.params
 import dev.remoteagent.core.protocol.Event
 import dev.remoteagent.core.protocol.Item
 import dev.remoteagent.core.protocol.ItemKind
@@ -162,6 +164,27 @@ class SessionStoreTests {
         val s = SessionStore("s", h)
         assertFailsWith<IllegalStateException> { s.send("hello") }
         assertTrue(s.outbox.value.isEmpty())
+    }
+
+    @Test
+    fun sendNowNamesTheQueuedPrompt() = runTest {
+        val h = Host(this)
+        val s = SessionStore("s", h)
+        s.sendNow("q")
+        assertEquals("session.sendNow", h.calls[0].first)
+        assertEquals(params("sessionId" to "s", "itemId" to "q"), h.calls[0].second)
+    }
+
+    @Test
+    fun sendNowOnAnOlderRadSaysToUpdateIt() = runTest {
+        val h = Host(this).apply { fail = RpcError("method_not_found", "unknown method session.sendNow") }
+        val s = SessionStore("s", h)
+        val e = assertFailsWith<RpcError> { s.sendNow("q") }
+        assertEquals("method_not_found", e.code)
+        assertEquals("This server's rad is too old to send a queued prompt now. Update rad on it.", e.message)
+        // Other errors are the server's own.
+        h.fail = RpcError("not_found", "no such session")
+        assertEquals("no such session", assertFailsWith<RpcError> { s.sendNow("q") }.message)
     }
 
 }

@@ -203,13 +203,17 @@ struct SessionView: View {
     }
 
     /// Items in order, with a footer after the last item of each interrupted or failed turn.
+    /// A prompt queued during a turn sits among its items, so the last is looked up.
     private var rows: [Row] {
         var out: [Row] = []
         let items = store.transcript
+        var last: [String: Int] = [:]
+        for (i, item) in items.enumerated() {
+            if let tid = item.turnId { last[tid] = i }
+        }
         for (i, item) in items.enumerated() {
             out.append(.item(item))
-            let nextTurn = i + 1 < items.count ? items[i + 1].turnId : nil
-            if let tid = item.turnId, nextTurn != tid, let t = store.turns[tid], t.status == .interrupted || t.status == .failed {
+            if let tid = item.turnId, last[tid] == i, let t = store.turns[tid], t.status == .interrupted || t.status == .failed {
                 out.append(.turnFooter(t))
             }
         }

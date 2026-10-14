@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -49,6 +51,8 @@ import dev.remoteagent.core.protocol.get
 import dev.remoteagent.core.protocol.pretty
 import dev.remoteagent.core.protocol.stringValue
 import dev.remoteagent.core.store.SessionStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -60,6 +64,7 @@ fun ItemView(item: Item, store: SessionStore, children: Map<String, List<Item>>)
         ItemKind.USER_MESSAGE -> UserBubble(
             item.text ?: "", item.images ?: emptyList(),
             pending = item.status == ItemStatus.QUEUED, cancelled = item.status == ItemStatus.CANCELLED,
+            sendNow = if (item.status == ItemStatus.QUEUED) ({ store.sendNow(item.id) }) else null,
         )
         ItemKind.ASSISTANT_MESSAGE -> SelectionContainer {
             AgentMarkdown(item.text ?: "", Modifier.testTag("reply"), images = item.images ?: emptyList())
@@ -80,8 +85,15 @@ fun ItemView(item: Item, store: SessionStore, children: Map<String, List<Item>>)
     }
 }
 
+/**
+ * A prompt. `pending` fades it, as one waiting to be sent or queued behind the
+ * running turn; `sendNow`, for one queued on the server, sends it at once.
+ */
 @Composable
-fun UserBubble(text: String, images: List<ImageRef> = emptyList(), pending: Boolean = false, cancelled: Boolean = false) {
+fun UserBubble(
+    text: String, images: List<ImageRef> = emptyList(), pending: Boolean = false, cancelled: Boolean = false,
+    sendNow: (suspend () -> Unit)? = null,
+) {
     val faded = pending || cancelled
     Row(Modifier.fillMaxWidth().testTag("user-bubble"), horizontalArrangement = Arrangement.End) {
         Spacer(Modifier.width(40.dp))
@@ -98,10 +110,40 @@ fun UserBubble(text: String, images: List<ImageRef> = emptyList(), pending: Bool
                     )
                 }
             }
-            if (pending) Text("Queued", style = Type.caption2, color = palette.subtext)
+            if (pending && sendNow != null) QueuedCaption(sendNow)
+            else if (pending) Text("Queued", style = Type.caption2, color = palette.subtext)
             else if (cancelled) Text("Not sent", style = Type.caption2, color = palette.subtext)
         }
     }
+}
+
+/** "Queued", with a way to send the prompt now: rad interrupts the turn and starts the next with it. */
+@Composable
+private fun QueuedCaption(sendNow: suspend () -> Unit) {
+    val connection = LocalConnection.current
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Queued · ", style = Type.caption2, color = palette.subtext)
+        Text(
+            "Send now", style = Type.caption2.copy(fontWeight = FontWeight.SemiBold), color = if (busy) palette.overlay else palette.accent,
+            modifier = Modifier.clickable(enabled = !busy, role = Role.Button) {
+                busy = true
+                connection.scope.launch {
+                    try {
+                        sendNow()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        error = e.message ?: "The request failed"
+                    } finally {
+                        busy = false
+                    }
+                }
+            }.testTag("send-now"),
+        )
+    }
+    ErrorDialog(error, title = "Error") { error = null }
 }
 
 @Composable

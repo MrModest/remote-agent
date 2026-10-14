@@ -188,6 +188,18 @@ public final class SessionStore {
         let _: Empty = try await c.call("session.interrupt", P(sessionId: sessionID, force: force))
     }
 
+    /// Interrupts the running turn and starts the next one with this queued
+    /// prompt, ahead of the others.
+    public func sendNow(_ item: Item) async throws {
+        guard let c = connection else { throw RPCError.disconnected }
+        struct P: Encodable, Sendable { var sessionId: String; var itemId: String }
+        do {
+            let _: Empty = try await c.call("session.sendNow", P(sessionId: sessionID, itemId: item.id))
+        } catch let e as RPCError where e.code == "method_not_found" {
+            throw RPCError(code: e.code, message: "This server's rad is too old to send a queued prompt now. Update rad on it.")
+        }
+    }
+
     public func respond(to approval: Item, option: ApprovalOption, message: String? = nil, answers: [String: String]? = nil) async throws {
         guard let c = connection else { throw RPCError.disconnected }
         struct P: Encodable, Sendable {

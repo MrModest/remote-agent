@@ -319,14 +319,18 @@ function DockedTerminal({ placement, panel }: { placement: "below" | "right"; pa
 
 type Row = { kind: "item"; item: Item } | { kind: "turn"; turn: Turn };
 
-/** Items in order, with a footer after the last item of each interrupted or failed turn. */
+/** Items in order, with a footer after the last item of each interrupted or failed turn.
+ *  A prompt queued during a turn sits among its items, so the last is looked up. */
 function transcriptRows(items: Item[], turns: Map<string, Turn>): Row[] {
   const out: Row[] = [];
+  const last = new Map<string, number>();
+  items.forEach((item, i) => {
+    if (item.turnId) last.set(item.turnId, i);
+  });
   items.forEach((item, i) => {
     out.push({ kind: "item", item });
-    const next = items[i + 1]?.turnId;
     const t = item.turnId ? turns.get(item.turnId) : undefined;
-    if (t && next !== item.turnId && (t.status === "interrupted" || t.status === "failed")) out.push({ kind: "turn", turn: t });
+    if (t && last.get(t.id) === i && (t.status === "interrupted" || t.status === "failed")) out.push({ kind: "turn", turn: t });
   });
   return out;
 }

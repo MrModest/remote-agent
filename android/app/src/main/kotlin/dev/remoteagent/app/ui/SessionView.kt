@@ -221,12 +221,24 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
     fun send() {
         if (!canSend) return
         val text = draft
-        val images = attachments.refs
+        val sent = attachments.entries.toList()
         draft = ""
         attachments.clear()
         // Back to the foot of the transcript, which then follows the reply.
         toBottom()
-        run { store.send(text, images) }
+        connection.scope.launch {
+            try {
+                store.send(text, sent.mapNotNull { it.ref })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // It didn't go: back into the composer, ahead of anything
+                // written since.
+                draft = listOf(text, store.draft).filter { it.isNotEmpty() }.joinToString("\n")
+                attachments.restore(sent)
+                error = e.message ?: "The request failed"
+            }
+        }
     }
 
     // Runs a slash command, as a prompt of its own: the draft stays. While a

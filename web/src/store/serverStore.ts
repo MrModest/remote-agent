@@ -108,10 +108,13 @@ export class ServerStore extends Observable {
     this.save();
   }
 
-  /** Reconnects the connections in use, when the page is shown again. */
+  /** Reconnects the connections in use, when the page is shown again, and
+   *  checks that the connected ones still answer: after the computer sleeps,
+   *  a socket can be dead without a word. */
   wake() {
     for (const c of this.connections.values()) {
-      if (c.state.kind !== "connected") c.retry();
+      if (c.state.kind === "connected") c.check();
+      else c.retry();
     }
   }
 }

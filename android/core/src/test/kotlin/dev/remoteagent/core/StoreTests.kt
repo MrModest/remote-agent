@@ -52,6 +52,7 @@ class SessionStoreTests {
             fail?.let { throw it }
             return JsonObject(emptyMap())
         }
+        override suspend fun deliver(method: String, params: JsonElement, timeout: Duration) = callRaw(method, params, timeout)
         override fun activate(store: SessionStore) {
             activated++
         }

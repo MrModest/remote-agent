@@ -31,19 +31,35 @@ interface Pending {
 
 /** One WebSocket connection to rad, speaking the JSON-RPC-shaped protocol.
  *  Reconnection is the owner's job: when the socket drops, `onMessage` gets
- *  `closed` and pending calls fail with `RPCError.disconnected`. */
+ *  `closed` and pending calls fail with `RPCError.disconnected`.
+ *
+ *  A socket can die without a word, as when the computer sleeps and rad
+ *  gives up on it: nothing arrives, and sends vanish. `ping` finds out, and
+ *  so does a call that goes unanswered; either drops a socket that doesn't
+ *  answer. */
 export class RPCClient {
   onMessage: (m: ServerMessage) => void = () => {};
   connectedURL: string | null = null;
+  /** Seconds a ping waits for its answer. */
+  pingTimeout = 5;
 
   private ws: WebSocket | null = null;
   private pending = new Map<number, Pending>();
   private nextID = 0;
+  /** When the socket last brought something, in Date.now() time. */
+  private lastHeard = Date.now();
 
   constructor(private token: string) {}
 
   get isConnected(): boolean {
     return this.ws !== null;
+  }
+
+  /** Seconds the socket has been silent. By the wall clock: on macOS,
+   *  Chrome's performance.now() stands still while the computer sleeps, so
+   *  only Date.now() makes this at least as long as the sleep. */
+  get silence(): number {
+    return (Date.now() - this.lastHeard) / 1000;
   }
 
   /** Connects to the first base URL that accepts our token. Returns server info. */
@@ -67,6 +83,7 @@ export class RPCClient {
     // token goes as a subprotocol (protocol/PROTOCOL.md, Transport).
     const ws = new WebSocket(url, ["rad.v1", "rad.token." + this.token]);
     this.ws = ws;
+    this.lastHeard = Date.now();
     const opened = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(RPCError.timeout()), 10_000);
       ws.onopen = () => {
@@ -90,14 +107,17 @@ export class RPCClient {
     }
     if (this.ws !== ws) throw RPCError.disconnected();
     ws.onmessage = (e) => {
-      if (this.ws === ws && typeof e.data === "string") this.dispatch(e.data);
+      if (this.ws !== ws) return;
+      this.lastHeard = Date.now();
+      if (typeof e.data === "string") this.dispatch(e.data);
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
       this.close(e.code === revokedCode ? RPCError.unauthorized().message : e.reason || undefined, true);
     };
     try {
-      const info = await this.call<ServerInfo>("server.info", undefined, 8);
+      // Not `call`: an answer that doesn't come fails the attempt, without a ping.
+      const info = await this.request<ServerInfo>("server.info", undefined, 8);
       this.connectedURL = base;
       return info;
     } catch (e) {
@@ -172,16 +192,64 @@ export class RPCClient {
   }
 
   call<R>(method: string, params?: unknown, timeout = 30): Promise<R> {
+    return this.request<R>(method, params, timeout, (id, ws) => void this.unanswered(id, ws));
+  }
+
+  /** Checks that the server answers. Browsers can't send ping frames, so it
+   *  asks for `server.info`, which rad answers at once. A socket that
+   *  doesn't answer within `timeout` seconds is dropped, so the owner
+   *  reconnects. */
+  async ping(timeout = this.pingTimeout): Promise<boolean> {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(RPCError.disconnected());
+    if (!ws) return false;
+    let alive = true;
+    try {
+      await this.request("server.info", undefined, timeout);
+    } catch (e) {
+      // An error is an answer too.
+      alive = !(e instanceof RPCError && (e.code === "timeout" || e.code === "disconnected"));
+    }
+    if (!alive && this.ws === ws) this.close("The server stopped answering", true);
+    return alive;
+  }
+
+  /** Sends a request; `late` runs if no answer comes within `timeout`
+   *  seconds, and fails it as timed out unless told otherwise. */
+  private request<R>(
+    method: string,
+    params: unknown,
+    timeout: number,
+    late: (id: number, ws: WebSocket) => void = (id) => this.fail(id, RPCError.timeout()),
+  ): Promise<R> {
+    const ws = this.ws;
+    if (!ws) return Promise.reject(RPCError.disconnected());
+    if (ws.readyState !== WebSocket.OPEN) {
+      // A closing socket can't send: drop it now rather than when it says so.
+      if (ws.readyState !== WebSocket.CONNECTING) this.close("The connection closed", true);
+      return Promise.reject(RPCError.disconnected());
+    }
     const id = ++this.nextID;
     return new Promise<R>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(RPCError.timeout());
-      }, timeout * 1000);
+      const timer = setTimeout(() => late(id, ws), timeout * 1000);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       ws.send(JSON.stringify({ id, method, params: params ?? {} }));
     });
+  }
+
+  private fail(id: number, error: Error) {
+    const p = this.pending.get(id);
+    if (!p) return;
+    this.pending.delete(id);
+    p.reject(error);
+  }
+
+  /** No answer in time. If the socket doesn't answer a ping either, it's
+   *  dropped, which fails the call as disconnected; otherwise the server is
+   *  just slow, and the call times out. */
+  private async unanswered(id: number, ws: WebSocket) {
+    if (!this.pending.has(id)) return;
+    if (this.ws === ws && !(await this.ping())) return;
+    this.fail(id, RPCError.timeout());
   }
 
   // HTTP, beside the socket.

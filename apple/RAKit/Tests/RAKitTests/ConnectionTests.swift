@@ -42,4 +42,61 @@ struct ConnectionTests {
         try await wait { failed(c) }
         c.stop()
     }
+
+    private func connect(to server: TestServer) async throws -> ServerConnection {
+        let url = try await server.start()
+        let saved = SavedServer(id: "srv", name: "Test", urls: [url], deviceId: "dev1", addedAt: .now)
+        let c = ServerConnection(server: saved, token: "t", defaults: UserDefaults(suiteName: "dev.remote-agent.ConnectionTests")!) { _ in }
+        c.firstRetryDelay = 0.01
+        c.heartbeat = .milliseconds(50)
+        c.pingTimeout = 0.3
+        c.start()
+        try await wait { c.state == .connected }
+        return c
+    }
+
+    @Test func dropsASocketThatStopsAnswering() async throws {
+        let server = try TestServer()
+        let c = try await connect(to: server)
+        defer { c.stop(); server.stop() }
+
+        // While it answers, the pings keep it.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(server.connectionCount == 1)
+
+        // Gone quiet, as after a sleep: the ping goes unanswered, so it
+        // reconnects rather than passing for connected.
+        server.quiet()
+        try await wait { server.connectionCount == 2 }
+        try await wait { c.state == .connected }
+    }
+
+    @Test func promptSentOnADeadSocketIsDeliveredAfterReconnecting() async throws {
+        let server = try TestServer()
+        let c = try await connect(to: server)
+        defer { c.stop(); server.stop() }
+        let store = c.sessionStore("s1")
+
+        server.quiet()
+        try await store.send("hello")
+
+        // Sent again on the new socket, with the same commandId.
+        let prompts = server.calls.filter { $0.method == "session.prompt" }
+        #expect(prompts.last?.connection == 1)
+        #expect(Set(prompts.map(\.commandID)).count == 1)
+        // Shown until the transcript has it.
+        #expect(store.outbox.values.map(\.text) == ["hello"])
+    }
+
+    @Test func promptFailsOnceTheConnectionGivesUp() async throws {
+        let server = try TestServer()
+        let c = try await connect(to: server)
+        defer { c.stop() }
+        let store = c.sessionStore("s1")
+
+        server.stop()
+        await #expect(throws: RPCError.self) { try await store.send("hello") }
+        #expect(failed(c))
+        #expect(store.outbox.isEmpty)
+    }
 }

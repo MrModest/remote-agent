@@ -375,12 +375,22 @@ struct SessionView: View {
         case .stopDictation:
             dictation.stop()
         case .send:
-            let text = store.draft, images = attachments.refs
+            let text = store.draft, sent = attachments.entries
             store.draft = ""
             attachments.clear()
             // Back to the foot of the transcript, which then follows the reply.
             withAnimation { scrollPosition.scrollTo(edge: .bottom) }
-            Task { await run { try await store.send(text, images: images) } }
+            Task {
+                do {
+                    try await store.send(text, images: sent.compactMap(\.ref))
+                } catch {
+                    // It didn't go: back into the composer, ahead of anything
+                    // written since.
+                    store.draft = [text, store.draft].filter { !$0.isEmpty }.joined(separator: "\n")
+                    attachments.restore(sent)
+                    self.error = error.localizedDescription
+                }
+            }
         }
     }
 

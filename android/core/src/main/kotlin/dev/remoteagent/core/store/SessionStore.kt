@@ -34,6 +34,8 @@ interface SessionHost {
     val scope: CoroutineScope
     val isConnected: Boolean
     suspend fun callRaw(method: String, params: JsonElement, timeout: Duration = 30.seconds): JsonElement
+    /** Calls a command that carries a commandId, sending it again after a dropped connection (ServerConnection's). */
+    suspend fun deliver(method: String, params: JsonElement, timeout: Duration = 30.seconds): JsonElement
     fun activate(store: SessionStore)
     fun deactivate(store: SessionStore)
     suspend fun subscribe(store: SessionStore)
@@ -230,12 +232,16 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
 
     private val c: SessionHost get() = host ?: throw RpcError.disconnected()
 
+    /**
+     * Sends a prompt. It shows in `outbox` until the transcript has it, and
+     * waits out a dropped connection; it throws once the connection gives up.
+     */
     suspend fun send(text: String, images: List<ImageRef> = emptyList()) {
         val c = c
         val commandId = UUID.randomUUID().toString()
         _outbox.value += commandId to Outgoing(text, images)
         try {
-            c.callRaw(
+            c.deliver(
                 "session.prompt",
                 params("commandId" to commandId, "sessionId" to sessionID, "text" to text, "images" to imageIds(images)),
             )

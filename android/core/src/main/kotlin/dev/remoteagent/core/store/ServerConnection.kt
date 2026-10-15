@@ -1,6 +1,7 @@
 package dev.remoteagent.core.store
 
 import dev.remoteagent.core.net.Http
+import dev.remoteagent.core.net.PING_INTERVAL
 import dev.remoteagent.core.net.REVOKED_CODE
 import dev.remoteagent.core.net.RpcClient
 import dev.remoteagent.core.net.RpcError
@@ -22,12 +23,14 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import okhttp3.OkHttpClient
 import okhttp3.Response
@@ -63,6 +66,7 @@ class ServerConnection(
     private val onURLWorked: (String) -> Unit,
     http: OkHttpClient = Http.client,
     storage: Storage? = null,
+    pingInterval: Duration = PING_INTERVAL,
 ) : SessionHost {
     private val _server = MutableStateFlow(server)
     val server: StateFlow<SavedServer> = _server.asStateFlow()
@@ -81,14 +85,14 @@ class ServerConnection(
     val indexSynced: StateFlow<Boolean> = _indexSynced.asStateFlow()
     override val drafts = Drafts(storage, server.id)
 
-    private val client = RpcClient(token, http)
+    private val client = RpcClient(token, http, pingInterval)
     private var indexSeq = 0L
     private var indexLive = false
     /** As SessionStore's: index subscriptions not yet synchronized. */
     private var indexOutstanding = 0
     private var indexReplay = mutableListOf<Event>()
     private val sessionStores = HashMap<String, SessionStore>()
-    private var wanted = false
+    private val wanted = MutableStateFlow(false)
     private var runJob: Job? = null
     /** The wait after the first failed attempt, doubling after each one. */
     internal var firstRetryDelay: Duration = 1.seconds
@@ -108,19 +112,19 @@ class ServerConnection(
     // Lifecycle
 
     fun start() {
-        wanted = true
+        wanted.value = true
         if (runJob?.isActive == true) return
         runJob = scope.launch { runLoop() }
     }
 
     fun stop() {
-        wanted = false
+        wanted.value = false
         pause()
     }
 
     /** Stops for good, revoking this device on the server first if reachable. */
     internal fun unpairAndStop() {
-        wanted = false
+        wanted.value = false
         runJob?.cancel()
         runJob = null
         _state.value = ConnectionState.Idle
@@ -141,7 +145,7 @@ class ServerConnection(
     }
 
     internal fun resumeIfWanted() {
-        if (wanted) start()
+        if (wanted.value) start()
     }
 
     /** Reconnect now (e.g. pull-to-refresh after a failure). */
@@ -154,7 +158,7 @@ class ServerConnection(
     private suspend fun runLoop() {
         var delay = firstRetryDelay
         var failures = 0
-        while (currentCoroutineContext().isActive && wanted) {
+        while (currentCoroutineContext().isActive && wanted.value) {
             if (client.isConnected) {
                 sleep(2.seconds)
                 continue
@@ -231,7 +235,7 @@ class ServerConnection(
                 indexOutstanding = 0
                 for (s in sessionStores.values) s.closed()
                 // Not after pause(): the socket closed because we closed it.
-                if (wanted && runJob != null) {
+                if (wanted.value && runJob != null) {
                     _state.value = ConnectionState.Connecting
                     wake.trySend(Unit)
                 }
@@ -317,6 +321,39 @@ class ServerConnection(
     override suspend fun callRaw(method: String, params: JsonElement, timeout: Duration): JsonElement =
         client.callRaw(method, params, timeout)
 
+    /**
+     * Calls a command that carries a commandId until it gets through: when the
+     * socket drops or the server doesn't answer, it waits for the connection
+     * to come back and sends it again. rad applies a commandId once, so a
+     * repeat of one that got there returns the first result. It throws once
+     * the connection gives up or stops.
+     */
+    override suspend fun deliver(method: String, params: JsonElement, timeout: Duration): JsonElement {
+        var attempts = 0
+        while (true) {
+            waitUntilConnected()
+            attempts += 1
+            try {
+                return client.callRaw(method, params, timeout)
+            } catch (e: RpcError) {
+                if ((e.code != "disconnected" && e.code != "timeout") || attempts >= MAX_ATTEMPTS) throw e
+            }
+        }
+    }
+
+    /**
+     * Returns once connected. While paused (the app is in the background, or
+     * a picker is open) it waits for the app to come back; it throws once the
+     * connection is stopped or gives up.
+     */
+    private suspend fun waitUntilConnected() {
+        val (s, w) = combine(_state, wanted, ::Pair).first { (s, w) ->
+            // The socket goes before `state` hears that it closed.
+            !w || s is ConnectionState.Failed || (s == ConnectionState.Connected && client.isConnected)
+        }
+        if (!w || s is ConnectionState.Failed) throw RpcError.disconnected()
+    }
+
     suspend fun refreshHarnesses(force: Boolean = false) {
         attempt { client.call<HarnessList>("harness.list", params("refresh" to force), 45.seconds) }?.let {
             _harnesses.value = it.harnesses
@@ -330,7 +367,7 @@ class ServerConnection(
      * (and so the socket) for a moment, so this waits for the connection.
      */
     suspend fun uploadImage(data: ByteArray): ImageRef {
-        withTimeoutOrNull(10.seconds) { _state.first { it == ConnectionState.Connected } }
+        withTimeoutOrNull(10.seconds) { waitUntilConnected() }
         val ref = client.uploadImage(data)
         imageCache.store(data, ref.id)
         return ref
@@ -401,7 +438,8 @@ class ServerConnection(
     suspend fun branches(projectID: String): Branches = client.call("git.branches", params("projectId" to projectID))
 
     suspend fun createSession(p: NewSession): Session {
-        val s: Session = client.call("session.create", WireCoding.json.encodeToJsonElement(p), 90.seconds)
+        val created = deliver("session.create", WireCoding.json.encodeToJsonElement(p), 90.seconds)
+        val s: Session = WireCoding.json.decodeFromJsonElement(created)
         _sessions.value += s.id to s
         return s
     }

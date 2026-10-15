@@ -6,6 +6,8 @@ import { Observable } from "./observable";
 /** What a session store needs from its connection. */
 export interface SessionHost {
   call<R>(method: string, params?: unknown, timeout?: number): Promise<R>;
+  /** Calls a command with a commandId, sending it again after a drop. */
+  deliver<R>(method: string, params: unknown, timeout?: number): Promise<R>;
   activate(store: SessionStore): void;
   deactivate(store: SessionStore): void;
   subscribe(store: SessionStore): Promise<void>;
@@ -207,13 +209,15 @@ export class SessionStore extends Observable {
     return this.host;
   }
 
+  /** Sends a prompt. It shows in `outbox` until the transcript has it, and
+   *  waits out a dropped connection; it throws once the connection gives up. */
   async send(text: string, images: ImageRef[] = []) {
     const c = this.c;
     const commandId = crypto.randomUUID();
     this.outbox.set(commandId, { text, images });
     this.changed();
     try {
-      await c.call<Item>("session.prompt", {
+      await c.deliver<Item>("session.prompt", {
         commandId,
         sessionId: this.sessionID,
         text,

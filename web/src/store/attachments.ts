@@ -103,6 +103,13 @@ export class Attachments extends Observable {
     this.changed();
   }
 
+  /** Puts back the images of a prompt that couldn't be sent, ahead of any
+   *  added since. They are on the server already. */
+  restore(sent: Attachment[]) {
+    this.entries = [...sent, ...this.entries];
+    this.changed();
+  }
+
   remove(id: string) {
     this.entries = this.entries.filter((e) => e.id !== id);
     this.data.delete(id);

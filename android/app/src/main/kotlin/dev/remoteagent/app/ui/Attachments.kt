@@ -29,7 +29,9 @@ class Attachments(private val connection: ServerConnection, private val onError:
         data class Failed(val message: String) : State
     }
 
-    data class Entry(val id: Long, val thumbnail: Bitmap, val state: State)
+    data class Entry(val id: Long, val thumbnail: Bitmap, val state: State) {
+        val ref: ImageRef? get() = (state as? State.Uploaded)?.ref
+    }
 
     val entries = mutableStateListOf<Entry>()
     private val data = HashMap<Long, ByteArray>()
@@ -38,11 +40,19 @@ class Attachments(private val connection: ServerConnection, private val onError:
     val isEmpty: Boolean get() = entries.isEmpty()
     /** Every image is on the server, so the prompt can go. */
     val ready: Boolean get() = entries.all { it.state is State.Uploaded }
-    val refs: List<ImageRef> get() = entries.mapNotNull { (it.state as? State.Uploaded)?.ref }
+    val refs: List<ImageRef> get() = entries.mapNotNull { it.ref }
 
     fun clear() {
         entries.clear()
         data.clear()
+    }
+
+    /**
+     * Puts back the images of a prompt that couldn't be sent, ahead of any
+     * added since. They are on the server already.
+     */
+    fun restore(sent: List<Entry>) {
+        entries.addAll(0, sent)
     }
 
     fun remove(id: Long) {

@@ -168,14 +168,16 @@ public final class SessionStore {
 
     // MARK: Commands
 
+    /// Sends a prompt. It shows in `outbox` until the transcript has it, and
+    /// waits out a dropped connection; it throws once the connection gives up.
     public func send(_ text: String, images: [ImageRef] = []) async throws {
         guard let c = connection else { throw RPCError.disconnected }
         let commandID = UUID().uuidString
         outbox[commandID] = Outgoing(text: text, images: images)
         struct P: Encodable, Sendable { var commandId: String; var sessionId: String; var text: String; var images: [String]? }
         do {
-            let _: Item = try await c.call("session.prompt", P(commandId: commandID, sessionId: sessionID, text: text,
-                                                               images: images.isEmpty ? nil : images.map(\.id)))
+            let _: Item = try await c.deliver("session.prompt", P(commandId: commandID, sessionId: sessionID, text: text,
+                                                                  images: images.isEmpty ? nil : images.map(\.id)))
         } catch {
             outbox[commandID] = nil
             throw error

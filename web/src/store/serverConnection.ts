@@ -29,7 +29,9 @@ export interface NewSession {
 /** A live connection to one server: keeps the index (projects and sessions)
  *  in sync, owns per-session stores, and reconnects with backoff. It stays
  *  `connecting` while it tries, and gives up after `maxAttempts` failures in
- *  a row: `failed` until `start()` or `retry()`. */
+ *  a row: `failed` until `start()` or `retry()`. A socket that has been
+ *  silent for `heartbeat` is pinged, and dropped if it doesn't answer, so
+ *  one that died while the computer slept doesn't pass for connected. */
 export class ServerConnection extends Observable implements SessionHost {
   /** Failed attempts in a row before the connection gives up. */
   static readonly maxAttempts = 5;
@@ -55,6 +57,8 @@ export class ServerConnection extends Observable implements SessionHost {
   private wake: (() => void) | undefined;
   /** The wait after the first failed attempt, in seconds, doubling after each one. */
   firstRetryDelay = 1;
+  /** Seconds a socket may stay silent before it's pinged. */
+  heartbeat = 15;
 
   constructor(
     public server: SavedServer,
@@ -69,6 +73,15 @@ export class ServerConnection extends Observable implements SessionHost {
 
   get isConnected(): boolean {
     return this.state.kind === "connected";
+  }
+
+  /** Seconds to wait for a ping's answer. */
+  get pingTimeout(): number {
+    return this.client.pingTimeout;
+  }
+
+  set pingTimeout(seconds: number) {
+    this.client.pingTimeout = seconds;
   }
 
   /** The session's shell on the server, for one view to show. */
@@ -127,6 +140,12 @@ export class ServerConnection extends Observable implements SessionHost {
     void this.runLoop(++this.run);
   }
 
+  /** Pings the socket now rather than at the next heartbeat, as when the
+   *  page comes back: the computer may have slept. */
+  check() {
+    if (this.isConnected) void this.client.ping();
+  }
+
   /** A run loop is going. */
   private looping = false;
 
@@ -136,7 +155,10 @@ export class ServerConnection extends Observable implements SessionHost {
     try {
       while (run === this.run && this.wanted) {
         if (this.client.isConnected) {
-          await this.sleep(2);
+          await this.sleep(Math.min(2, this.heartbeat));
+          // After a sleep the silence is at least as long, so the first
+          // check after waking pings.
+          if (run === this.run && this.client.silence >= this.heartbeat) await this.client.ping();
           continue;
         }
         this.setState({ kind: "connecting" });
@@ -336,6 +358,34 @@ export class ServerConnection extends Observable implements SessionHost {
     return this.client.call<R>(method, params, timeout);
   }
 
+  /** Calls a command that carries a commandId until it gets through: when
+   *  the socket drops or the server doesn't answer, it waits for the
+   *  connection to come back and sends it again. rad applies a commandId
+   *  once, so a repeat of one that got there returns the first result. It
+   *  throws once the connection gives up or stops. */
+  async deliver<R>(method: string, params: unknown, timeout = 30): Promise<R> {
+    for (let attempts = 1; ; attempts++) {
+      await this.waitUntilConnected();
+      try {
+        return await this.client.call<R>(method, params, timeout);
+      } catch (e) {
+        const lost = e instanceof RPCError && (e.code === "disconnected" || e.code === "timeout");
+        if (!lost || attempts >= ServerConnection.maxAttempts) throw e;
+      }
+    }
+  }
+
+  /** Returns once connected, waiting out a reconnect. It throws once the
+   *  connection is stopped or gives up. */
+  private async waitUntilConnected() {
+    for (;;) {
+      if (!this.wanted || this.state.kind === "failed") throw RPCError.disconnected();
+      // The socket goes before `state` hears that it closed.
+      if (this.isConnected && this.client.isConnected) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+
   async refreshHarnesses(force = false) {
     try {
       const r = await this.client.call<{ harnesses?: HarnessInfo[] }>("harness.list", { refresh: force }, 45);
@@ -383,7 +433,7 @@ export class ServerConnection extends Observable implements SessionHost {
   }
 
   async createSession(p: NewSession): Promise<Session> {
-    const s = await this.client.call<Session>("session.create", { commandId: crypto.randomUUID(), ...p }, 90);
+    const s = await this.deliver<Session>("session.create", { commandId: crypto.randomUUID(), ...p }, 90);
     this.sessions.set(s.id, s);
     this.changed();
     return s;

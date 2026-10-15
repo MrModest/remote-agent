@@ -28,6 +28,10 @@ public struct Empty: Decodable, Sendable {}
 /// One WebSocket connection to rad, speaking the JSON-RPC-shaped protocol.
 /// Reconnection is the owner's job: when the socket drops, `messages` yields
 /// `.closed` and pending calls fail with `RPCError.disconnected`.
+///
+/// A socket can die without a word, as when the Mac sleeps and rad gives up
+/// on it: nothing arrives, and sends vanish. `ping` finds out, and so does a
+/// call that goes unanswered; either drops a socket that doesn't answer.
 public actor RPCClient {
     public nonisolated let messages: AsyncStream<ServerMessage>
     private let continuation: AsyncStream<ServerMessage>.Continuation
@@ -36,8 +40,11 @@ public actor RPCClient {
     private let session: URLSession
     private var task: URLSessionWebSocketTask?
     private var pending: [Int: CheckedContinuation<Data, Error>] = [:]
+    private var pings: [Int: CheckedContinuation<Bool, Never>] = [:]
     private var nextID = 0
     public private(set) var connectedURL: URL?
+    /// When the socket last brought something: a message or a pong.
+    private var lastHeard = ContinuousClock.now
 
     public init(token: String) {
         self.token = token
@@ -73,6 +80,7 @@ public actor RPCClient {
         let t = session.webSocketTask(with: req)
         t.maximumMessageSize = 64 << 20
         task = t
+        lastHeard = .now
         t.resume()
         receive(t)
         do {
@@ -97,10 +105,43 @@ public actor RPCClient {
         let waiting = pending
         pending = [:]
         for (_, c) in waiting { c.resume(throwing: RPCError.disconnected) }
+        let pinging = pings
+        pings = [:]
+        for (_, c) in pinging { c.resume(returning: false) }
         if notify { continuation.yield(.closed(reason: reason)) }
     }
 
     public var isConnected: Bool { task != nil }
+
+    /// How long the socket has been silent. The continuous clock counts time
+    /// asleep, so after the Mac wakes this is at least as long as the sleep.
+    public var silence: Duration { ContinuousClock.now - lastHeard }
+
+    /// Pings the server and waits for the pong. A socket that doesn't answer
+    /// within `timeout` seconds is dropped, so the owner reconnects.
+    @discardableResult
+    public func ping(timeout: Double = 5) async -> Bool {
+        guard let t = task else { return false }
+        nextID += 1
+        let id = nextID
+        let alive = await withCheckedContinuation { c in
+            pings[id] = c
+            t.sendPing { [weak self] error in
+                Task { await self?.pong(id, alive: error == nil) }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeout))
+                await self?.pong(id, alive: false)
+            }
+        }
+        if alive { lastHeard = .now }
+        else if t === task { disconnect(reason: "The server stopped answering", notify: true) }
+        return alive
+    }
+
+    private func pong(_ id: Int, alive: Bool) {
+        pings.removeValue(forKey: id)?.resume(returning: alive)
+    }
 
     private nonisolated func receive(_ t: URLSessionWebSocketTask) {
         t.receive { [weak self] result in
@@ -115,6 +156,7 @@ public actor RPCClient {
         case .failure(let error):
             disconnect(reason: error.localizedDescription, notify: true)
         case .success(let msg):
+            lastHeard = .now
             let data: Data
             switch msg {
             case .string(let s): data = Data(s.utf8)
@@ -184,11 +226,11 @@ public actor RPCClient {
         let data: Data = try await withCheckedThrowingContinuation { c in
             pending[id] = c
             t.send(.string(String(decoding: body, as: UTF8.self))) { [weak self] error in
-                if let error, let self { Task { await self.fail(id, error) } }
+                if let error, let self { Task { await self.sendFailed(error, on: t) } }
             }
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeout))
-                await self?.fail(id, RPCError.timeout)
+                await self?.unanswered(id, on: t)
             }
         }
         let resp = try WireCoding.decoder().decode(Response<R>.self, from: data)
@@ -198,8 +240,19 @@ public actor RPCClient {
         throw RPCError(code: "invalid", message: "empty result for \(method)")
     }
 
-    private func fail(_ id: Int, _ error: Error) {
-        pending.removeValue(forKey: id)?.resume(throwing: error)
+    /// A socket that can't send is broken: drop it, failing its calls.
+    private func sendFailed(_ error: Error, on t: URLSessionWebSocketTask) {
+        guard t === task else { return }
+        disconnect(reason: error.localizedDescription, notify: true)
+    }
+
+    /// No answer in time. If the socket doesn't answer a ping either, it's
+    /// dropped, which fails the call as disconnected; otherwise the server is
+    /// just slow, and the call times out.
+    private func unanswered(_ id: Int, on t: URLSessionWebSocketTask) async {
+        guard pending[id] != nil else { return }
+        if t === task, await !ping() { return }
+        pending.removeValue(forKey: id)?.resume(throwing: RPCError.timeout)
     }
 
     // MARK: HTTP, beside the socket

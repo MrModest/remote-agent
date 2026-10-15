@@ -4,6 +4,7 @@ import dev.remoteagent.core.FakeRad.Companion.events
 import dev.remoteagent.core.FakeRad.Companion.project
 import dev.remoteagent.core.FakeRad.Companion.session
 import dev.remoteagent.core.FakeRad.Companion.upserted
+import dev.remoteagent.core.net.PING_INTERVAL
 import dev.remoteagent.core.net.RpcError
 import dev.remoteagent.core.store.ConnectionState
 import dev.remoteagent.core.store.ImageCache
@@ -27,12 +28,16 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import java.net.InetSocketAddress
 import java.time.Instant
 import java.util.concurrent.Executors
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -41,6 +46,9 @@ import kotlin.time.Duration.Companion.seconds
 class ServerConnectionTests {
     private val server = MockWebServer().apply { start() }
     private val rad = FakeRad()
+    /** The rad a reconnect reaches, in the tests that need two. */
+    private val next = FakeRad()
+    private val relay = lazy { Relay(InetSocketAddress(server.hostName, server.port)) }
     // The app changes a connection's state on the main thread; here, on this one.
     private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -48,14 +56,20 @@ class ServerConnectionTests {
     @AfterTest
     fun tearDown() {
         rad.shutDown()
+        next.shutDown()
         scope.cancel()
         dispatcher.close()
+        if (relay.isInitialized()) relay.value.close()
         server.close()
     }
 
-    private suspend fun connect(firstRetryDelay: Duration = 1.seconds): ServerConnection {
-        val saved = SavedServer("srv", "Test", listOf(server.base()), "dev1", Instant.now())
-        val c = ServerConnection(saved, "tok", scope, ImageCache(null), {})
+    private suspend fun connect(
+        firstRetryDelay: Duration = 1.seconds,
+        base: String = server.base(),
+        pingInterval: Duration = PING_INTERVAL,
+    ): ServerConnection {
+        val saved = SavedServer("srv", "Test", listOf(base), "dev1", Instant.now())
+        val c = ServerConnection(saved, "tok", scope, ImageCache(null), {}, pingInterval = pingInterval)
         c.firstRetryDelay = firstRetryDelay
         withContext(dispatcher) { c.start() }
         return c
@@ -176,6 +190,55 @@ class ServerConnectionTests {
         assertEquals(rounds * ServerConnection.MAX_ATTEMPTS, server.requestCount)
         val connecting = listOf(ConnectionState.Connecting, failed)
         assertEquals(listOf(ConnectionState.Idle) + List(rounds) { connecting }.flatten(), seen())
+        withContext(dispatcher) { c.stop() }
+    }
+
+    private fun commandId(call: JsonObject) = (call["params"] as JsonObject).getValue("commandId").jsonPrimitive.content
+
+    @Test
+    fun promptSentOnADeadSocketIsDeliveredAfterReconnecting() = runBlocking {
+        server.upgrade(rad)
+        server.upgrade(next)
+        val c = connect(base = relay.value.base, pingInterval = 100.milliseconds)
+        withTimeout(5.seconds) { c.state.first { it == ConnectionState.Connected } }
+        val store = withContext(dispatcher) { c.sessionStore("s1") }
+
+        // Gone quiet, as after a sleep: the prompt gets there, but its answer
+        // doesn't, and nor does the pong, so the socket is dropped.
+        relay.value.quiet()
+        withContext(dispatcher) { store.send("hello") }
+
+        // Sent again on the new socket, with the same commandId.
+        assertEquals(2, relay.value.connectionCount)
+        assertEquals(commandId(rad.nextCall("session.prompt")), commandId(next.nextCall("session.prompt")))
+        // Shown until the transcript has it.
+        assertEquals(listOf("hello"), store.outbox.value.values.map { it.text })
+        withContext(dispatcher) { c.stop() }
+    }
+
+    @Test
+    fun promptFailsOnceTheConnectionGivesUp() = runBlocking {
+        // The socket drops as the prompt goes, and rad doesn't come back.
+        rad.answer = { r, method, _ ->
+            when (method) {
+                "server.info" -> FakeRad.serverInfo
+                "session.prompt" -> {
+                    r.socket?.close(1001, "going away")
+                    null
+                }
+                else -> JsonObject(emptyMap())
+            }
+        }
+        server.upgrade(rad)
+        repeat(ServerConnection.MAX_ATTEMPTS) { server.enqueue(MockResponse.Builder().code(503).build()) }
+        val c = connect(firstRetryDelay = 10.milliseconds)
+        withTimeout(5.seconds) { c.state.first { it == ConnectionState.Connected } }
+        val store = withContext(dispatcher) { c.sessionStore("s1") }
+
+        val e = assertFailsWith<RpcError> { withContext(dispatcher) { store.send("hello") } }
+        assertEquals("disconnected", e.code)
+        assertIs<ConnectionState.Failed>(c.state.value)
+        assertTrue(store.outbox.value.isEmpty())
         withContext(dispatcher) { c.stop() }
     }
 }

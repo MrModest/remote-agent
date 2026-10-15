@@ -61,18 +61,26 @@ const val REVOKED_CODE = 4001
 /** `{}`, the params of a call that takes none. */
 val NoParams = JsonObject(emptyMap())
 
+/** How often the client pings rad. A pong that hasn't come by the next ping fails the socket. */
+val PING_INTERVAL = 30.seconds
+
 /**
  * One WebSocket connection to rad, speaking the JSON-RPC-shaped protocol.
  * Reconnection is the owner's job: when the socket drops, `messages` gets
  * `Closed` and pending calls fail with `RpcError.disconnected()`.
+ *
+ * A socket can die without a word, as when the network goes while the phone
+ * sleeps: nothing arrives, and sends vanish. OkHttp's pings find out, within
+ * two `pingInterval`s, and fail the socket.
  * Mirrors apple/RAKit/Sources/RAKit/Net/RPCClient.swift.
  */
-class RpcClient(private val token: String, http: OkHttpClient = Http.client) {
+class RpcClient(private val token: String, http: OkHttpClient = Http.client, pingInterval: Duration = PING_INTERVAL) {
     private val channel = Channel<ServerMessage>(Channel.UNLIMITED)
     val messages: ReceiveChannel<ServerMessage> get() = channel
 
     // The server pings every 25 s; the socket itself never times out a read.
-    private val sockets = http.newBuilder().readTimeout(0, TimeUnit.SECONDS).pingInterval(30, TimeUnit.SECONDS).build()
+    private val sockets = http.newBuilder().readTimeout(0, TimeUnit.SECONDS)
+        .pingInterval(pingInterval.inWholeMilliseconds, TimeUnit.MILLISECONDS).build()
     private val images = http.newBuilder().callTimeout(60, TimeUnit.SECONDS).build()
 
     private val lock = Any()

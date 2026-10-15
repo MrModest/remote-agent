@@ -11,7 +11,9 @@ public enum ConnectionState: Equatable, Sendable {
 /// A live connection to one server: keeps the index (projects + sessions)
 /// in sync, owns per-session stores, and reconnects with backoff. It stays
 /// `.connecting` while it tries, and gives up after `maxAttempts` failures
-/// in a row: `.failed` until `start()` or `retry()`.
+/// in a row: `.failed` until `start()` or `retry()`. A socket that has been
+/// silent for `heartbeat` is pinged, and dropped if it doesn't answer, so
+/// one that died while the Mac slept doesn't pass for connected.
 @MainActor @Observable
 public final class ServerConnection {
     /// Failed attempts in a row before the connection gives up.
@@ -36,6 +38,10 @@ public final class ServerConnection {
     private var runTask: Task<Void, Never>?
     /// The wait after the first failed attempt, doubling after each one.
     @ObservationIgnored var firstRetryDelay: Double = 1
+    /// How long a socket may stay silent before it's pinged.
+    @ObservationIgnored var heartbeat: Duration = .seconds(15)
+    /// Seconds to wait for a pong.
+    @ObservationIgnored var pingTimeout: Double = 5
     private var messagesTask: Task<Void, Never>?
     private let onURLWorked: (URL) -> Void
 
@@ -102,7 +108,12 @@ public final class ServerConnection {
         var failures = 0
         while !Task.isCancelled && wanted {
             if await client.isConnected {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: min(.seconds(2), heartbeat))
+                // After a sleep the silence is at least as long, so the
+                // first check after waking pings.
+                if await client.silence >= heartbeat {
+                    await client.ping(timeout: pingTimeout)
+                }
                 continue
             }
             state = .connecting
@@ -253,6 +264,38 @@ public final class ServerConnection {
         try await client.call(method, params)
     }
 
+    /// Calls a command that carries a commandId until it gets through: when
+    /// the socket drops or the server doesn't answer, it waits for the
+    /// connection to come back and sends it again. rad applies a commandId
+    /// once, so a repeat of one that got there returns the first result. It
+    /// throws once the connection gives up or stops.
+    func deliver<P: Encodable & Sendable, R: Decodable & Sendable>(_ method: String, _ params: P,
+                                                                   timeout: Double = 30) async throws -> R {
+        var attempts = 0
+        while true {
+            try await waitUntilConnected()
+            attempts += 1
+            do {
+                return try await client.call(method, params, timeout: timeout)
+            } catch let e as RPCError where attempts < Self.maxAttempts
+                        && (e.code == RPCError.disconnected.code || e.code == RPCError.timeout.code) {
+                continue
+            }
+        }
+    }
+
+    /// Returns once connected. While paused (the app is in the background)
+    /// it waits for the app to come back.
+    private func waitUntilConnected() async throws {
+        while true {
+            if !wanted { throw RPCError.disconnected }
+            if case .failed = state { throw RPCError.disconnected }
+            // The socket goes before `state` hears that it closed.
+            if state == .connected, await client.isConnected { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     public func refreshHarnesses(force: Bool = false) async {
         struct Res: Decodable { var harnesses: [HarnessInfo] }
         if let r: Res = try? await client.call("harness.list", ["refresh": force], timeout: 45) {
@@ -345,7 +388,7 @@ public final class ServerConnection {
     }
 
     public func createSession(_ p: NewSession) async throws -> Session {
-        let s: Session = try await client.call("session.create", p, timeout: 90)
+        let s: Session = try await deliver("session.create", p, timeout: 90)
         sessions[s.id] = s
         return s
     }

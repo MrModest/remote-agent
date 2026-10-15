@@ -13,6 +13,8 @@ final class Attachments {
         let id = UUID()
         let thumbnail: CGImage
         var state: State
+
+        var ref: ImageRef? { if case .uploaded(let r) = state { r } else { nil } }
     }
 
     enum State {
@@ -30,11 +32,17 @@ final class Attachments {
     var isUploading: Bool { entries.contains { if case .uploading = $0.state { true } else { false } } }
     /// Every image is on the server, so the prompt can go.
     var ready: Bool { entries.allSatisfy { if case .uploaded = $0.state { true } else { false } } }
-    var refs: [ImageRef] { entries.compactMap { if case .uploaded(let r) = $0.state { r } else { nil } } }
+    var refs: [ImageRef] { entries.compactMap(\.ref) }
 
     func clear() {
         entries = []
         data = [:]
+    }
+
+    /// Puts back the images of a prompt that couldn't be sent, ahead of any
+    /// added since. They are on the server already.
+    func restore(_ sent: [Entry]) {
+        entries.insert(contentsOf: sent, at: 0)
     }
 
     func remove(_ id: UUID) {

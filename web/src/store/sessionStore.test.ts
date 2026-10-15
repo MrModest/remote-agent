@@ -33,6 +33,9 @@ function host(): SessionHost & { subscribed: number; calls: [string, unknown][] 
       h.calls.push([method, params]);
       return {} as R;
     },
+    deliver<R>(method: string, params: unknown): Promise<R> {
+      return h.call<R>(method, params);
+    },
   };
   return h;
 }

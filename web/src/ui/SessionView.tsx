@@ -403,11 +403,17 @@ function Composer({
   const send = () => {
     if (!canSend || archived) return;
     const text = draft;
+    const sent = attachments.entries;
     const images = attachments.refs;
     setDraft("");
     attachments.clear();
     onSend();
-    store.send(text, images).catch((e) => onError(e.message));
+    store.send(text, images).catch((e) => {
+      // It didn't go: back into the composer, ahead of anything written since.
+      setDraft([text, store.draft].filter((t) => t !== "").join("\n"));
+      attachments.restore(sent);
+      onError(e.message);
+    });
   };
 
   const main = () => {

@@ -5,6 +5,7 @@ import { Markdown } from "./Markdown";
 import { notifications, useNotifications } from "./notifications";
 import { Modal } from "./primitives";
 import { interfaceSizes, messageFonts, messageSizes, settings, terminalPlacements, useSettings, type Appearance, type TerminalPlacement } from "./settings";
+import { sidebarLayouts, type SidebarLayout } from "./sidebarLayout";
 
 const codeFonts = ["", "Menlo", "SF Mono", "Monaco", "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", "Source Code Pro", "IBM Plex Mono"];
 const otherFont = "__other";
@@ -75,6 +76,23 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </section>
+
+        <h4 className="form-header">Sidebar</h4>
+        <section className="form-section">
+          <label className="form-row">
+            <span>Layout</span>
+            <select value={s.sidebarLayout} onChange={(e) => settings.update({ sidebarLayout: e.target.value as SidebarLayout })}>
+              {sidebarLayouts.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+        <p className="form-footer">
+          {sidebarLayouts.find((l) => l.id === s.sidebarLayout)?.summary} In a narrow window, a server's sessions are a list of their own.
+        </p>
 
         <h4 className="form-header">Terminal</h4>
         <section className="form-section">

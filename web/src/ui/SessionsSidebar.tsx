@@ -1,20 +1,23 @@
-import { Archive, ChevronRight, Ellipsis, Hand, Monitor, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Ellipsis, Hand, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import type { Session } from "../protocol/models";
 import { useObserved, useObservedAll } from "../store/observable";
 import type { ServerConnection } from "../store/serverConnection";
 import type { SavedServer } from "../store/serverStore";
 import { storage } from "../store/storage";
 import { ConnectionDot, connectionLabel } from "./components";
-import { ConnectionContext, useServerStore } from "./context";
-import { Menu, Spinner } from "./primitives";
-import { navigate, type Route } from "./router";
-import { ArchiveConfirm, SessionRow } from "./SessionRow";
+import { useServerStore } from "./context";
+import { InboxSidebar } from "./InboxSidebar";
+import { Menu, Spinner, type MenuEntry } from "./primitives";
+import { ProjectsSidebar } from "./ProjectsSidebar";
+import type { Route } from "./router";
+import { needsYou, type SidebarLayout } from "./sidebarLayout";
 
 export interface ServerActions {
   pair: () => void;
   settings: () => void;
   newSession: (c: ServerConnection) => void;
+  archive: (c: ServerConnection, s: Session) => void;
   rename: (s: SavedServer) => void;
   remove: (s: SavedServer) => void;
 }
@@ -25,47 +28,52 @@ export function reconnect(c: ServerConnection) {
   void c.refreshHarnesses(true);
 }
 
-/** The sidebar in a wide window, as on iPad and the Mac: every paired
- *  server, each with its sessions. A click on a server's name shows or hides
- *  them, or, once the connection has given up, tries again. */
-export function SessionsSidebar({ route, actions }: { route: Route; actions: ServerActions }) {
-  const store = useServerStore();
-  useObserved(store);
-  const [collapsed, setCollapsed] = useCollapsed(store.servers);
+/** The sidebar beside a session in a wide window, as on iPad and the Mac:
+ *  the Inbox or the Projects layout. The Columns layout has its own
+ *  (`CollectionsSidebar`). */
+export function SessionsSidebar({ layout, route, actions }: { layout: SidebarLayout; route: Route; actions: ServerActions }) {
   return (
     <div className="server-home">
-      <header className="bar">
-        <h1 className="bar-title">Sessions</h1>
-        <button className="icon-button" onClick={actions.settings} title="Settings" aria-label="Settings">
-          <Settings size={18} />
-        </button>
+      <SidebarBar title="Sessions" actions={actions}>
         <NewSessionButton onNew={actions.newSession} />
-      </header>
+      </SidebarBar>
       <div className="list-scroll">
-        {store.servers.map((s) => (
-          <ServerSection
-            key={s.id}
-            connection={store.connection(s)}
-            route={route}
-            expanded={!collapsed.has(s.id)}
-            setExpanded={(shown) => setCollapsed(s.id, !shown)}
-            actions={actions}
-          />
-        ))}
+        {layout === "projects" ? <ProjectsSidebar route={route} actions={actions} /> : <InboxSidebar route={route} actions={actions} />}
       </div>
-      <div className="sidebar-foot">
-        <button className="sidebar-foot-button" onClick={actions.pair}>
-          <Plus size={16} /> Pair a server
-        </button>
-      </div>
+      <SidebarFoot actions={actions} />
+    </div>
+  );
+}
+
+/** A sidebar's top bar: its title, Settings, and what else it holds. */
+export function SidebarBar({ title, actions, children }: { title: string; actions: ServerActions; children?: ReactNode }) {
+  return (
+    <header className="bar">
+      <h1 className="bar-title">{title}</h1>
+      <button className="icon-button" onClick={actions.settings} title="Settings" aria-label="Settings">
+        <Settings size={18} />
+      </button>
+      {children}
+    </header>
+  );
+}
+
+/** Pairing a server, at the foot of the sidebar. */
+export function SidebarFoot({ actions }: { actions: ServerActions }) {
+  return (
+    <div className="sidebar-foot">
+      <button className="sidebar-foot-button" onClick={actions.pair}>
+        <Plus size={16} /> Pair a server
+      </button>
     </div>
   );
 }
 
 const collapsedKey = "collapsedServers";
 
-/** The servers whose sessions are hidden, by id, kept across visits. */
-function useCollapsed(servers: SavedServer[]) {
+/** The servers whose rows are hidden, by id, kept across visits; the
+ *  Projects and Columns sidebars share them. */
+export function useCollapsed(servers: SavedServer[]) {
   const [ids, setIds] = useState(() => new Set((storage.get(collapsedKey) ?? "").split(" ").filter(Boolean)));
   const set = (id: string, collapsed: boolean) => {
     // Forgets servers that were removed.
@@ -79,7 +87,7 @@ function useCollapsed(servers: SavedServer[]) {
 
 /** Starts a session on the server connected, or, with several, on the one
  *  picked from a menu. */
-function NewSessionButton({ onNew }: { onNew: (c: ServerConnection) => void }) {
+export function NewSessionButton({ onNew }: { onNew: (c: ServerConnection) => void }) {
   const store = useServerStore();
   const connections = store.servers.map((s) => store.connection(s));
   useObservedAll(connections);
@@ -101,101 +109,41 @@ function NewSessionButton({ onNew }: { onNew: (c: ServerConnection) => void }) {
   );
 }
 
-/** One server in the sidebar: its header, how its connection is doing, and
- *  its sessions, those waiting for the user first. */
-function ServerSection({
+/** A server's actions, for its menus. */
+export function serverMenuEntries(connection: ServerConnection, actions: ServerActions): MenuEntry[] {
+  const server = connection.server;
+  return [
+    { label: `New session on ${server.name}`, icon: SquarePen, disabled: connection.state.kind !== "connected", onSelect: () => actions.newSession(connection) },
+    { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
+    { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
+    "divider",
+    { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
+  ];
+}
+
+/** A server as a section header: its name and connection, and while its
+ *  rows are hidden, how many sessions it has and whether one needs you. A
+ *  click shows or hides them, or tries again once the connection has given
+ *  up. On hover, a + starts a session on the server and ⋯ has its other
+ *  actions. */
+export function ServerHeader({
   connection,
-  route,
   expanded,
   setExpanded,
   actions,
 }: {
   connection: ServerConnection;
-  route: Route;
   expanded: boolean;
   setExpanded: (shown: boolean) => void;
   actions: ServerActions;
 }) {
   useObserved(connection);
-  const [showArchived, setShowArchived] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<Session>();
-  const id = connection.server.id;
-  const selected = route.serverID === id ? route.sessionID : undefined;
-
-  // Every server connects; one that was given up on waits for a click.
-  useEffect(() => {
-    if (connection.state.kind === "idle") connection.start();
-  }, [connection]);
-
-  // Landing on an archived session, such as one from a link, shows its row.
-  const selectedArchived = selected !== undefined && connection.sessions.get(selected)?.archived === true;
-  useEffect(() => {
-    if (selectedArchived) setShowArchived(true);
-  }, [selectedArchived]);
-
-  const active = connection.activeSessions;
-  const sessions = [...active.filter((s) => s.status === "awaiting_approval"), ...active.filter((s) => s.status !== "awaiting_approval")];
-  const archived = connection.archivedSessions;
-  const row = (s: Session) => (
-    <li key={s.id}>
-      <SessionRow
-        session={s}
-        selected={s.id === selected}
-        onOpen={() => navigate({ serverID: id, sessionID: s.id })}
-        onArchive={s.archived ? undefined : () => setArchiveTarget(s)}
-      />
-    </li>
-  );
-
-  return (
-    <ConnectionContext.Provider value={connection}>
-      <section className="server-section" aria-label={connection.server.name}>
-        <ServerHeader connection={connection} expanded={expanded} setExpanded={setExpanded} actions={actions} />
-        {expanded && (
-          <>
-            <ConnectionStatus connection={connection} onNew={() => actions.newSession(connection)} />
-            <ul className="session-list">{sessions.map(row)}</ul>
-            {archived.length > 0 && (
-              <button className="sidebar-status" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived}>
-                <span className="status-icon">
-                  <Archive size={15} className="c-overlay" />
-                </span>
-                <span className="c-subtext">Archived</span>
-                <span className="c-overlay">{archived.length}</span>
-                <ChevronRight size={14} className={"chevron c-overlay" + (showArchived ? " open" : "")} />
-              </button>
-            )}
-            {archived.length > 0 && showArchived && <ul className="session-list">{archived.map(row)}</ul>}
-          </>
-        )}
-      </section>
-      {archiveTarget && <ArchiveConfirm connection={connection} session={archiveTarget} onClose={() => setArchiveTarget(undefined)} />}
-    </ConnectionContext.Provider>
-  );
-}
-
-/** A server's header: its name and connection, and while its sessions are
- *  hidden, how many there are and whether one is waiting for the user. A
- *  click shows or hides them, or tries again once the connection has given
- *  up. On hover, a + starts a session on the server and ⋯ has its other
- *  actions. */
-function ServerHeader({
-  connection,
-  expanded,
-  setExpanded,
-  actions,
-}: {
-  connection: ServerConnection;
-  expanded: boolean;
-  setExpanded: (shown: boolean) => void;
-  actions: ServerActions;
-}) {
   const server = connection.server;
   const state = connection.state;
   const offline = state.kind === "failed";
   const connected = state.kind === "connected";
   const active = connection.activeSessions;
-  const waiting = active.some((s) => s.status === "awaiting_approval");
+  const waiting = active.some(needsYou);
 
   const activate = () => {
     if (offline) {
@@ -218,13 +166,10 @@ function ServerHeader({
         aria-label={label.join(", ")}
         title={offline ? `Try to connect to ${server.name} again` : connectionLabel(state)}
       >
-        <span className="status-icon">
-          <Monitor size={15} className="c-overlay" />
-        </span>
         <span className="server-header-name">{server.name}</span>
         <ConnectionDot state={state} />
         {!expanded && active.length > 0 && <span className="c-overlay">{active.length}</span>}
-        {!expanded && waiting && <Hand size={13} strokeWidth={2.25} className="c-yellow" />}
+        {!expanded && waiting && <Hand size={12} strokeWidth={2.25} className="c-yellow" />}
       </button>
       {connected && (
         <button
@@ -233,20 +178,14 @@ function ServerHeader({
           title={`New session on ${server.name}`}
           aria-label={`New session on ${server.name}`}
         >
-          <Plus size={16} />
+          <Plus size={15} />
         </button>
       )}
       <Menu
         className="icon-button server-header-action"
         title={`${server.name} actions`}
-        label={<Ellipsis size={16} />}
-        entries={[
-          { label: `New session on ${server.name}`, icon: SquarePen, disabled: !connected, onSelect: () => actions.newSession(connection) },
-          { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
-          { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
-          "divider",
-          { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
-        ]}
+        label={<Ellipsis size={15} />}
+        entries={serverMenuEntries(connection, actions)}
       />
     </div>
   );
@@ -254,14 +193,15 @@ function ServerHeader({
 
 /** While the server isn't connected, why; once it has given up, a way to
  *  try again. Connected without sessions, a way to start one. */
-function ConnectionStatus({ connection, onNew }: { connection: ServerConnection; onNew: () => void }) {
+export function ConnectionStatus({ connection, onNew }: { connection: ServerConnection; onNew: () => void }) {
+  useObserved(connection);
   const state = connection.state;
   switch (state.kind) {
     case "failed":
       return (
         <button className="sidebar-status" onClick={() => connection.retry()}>
-          <span className="status-icon">
-            <WifiOff size={15} className="c-red" />
+          <span className="status-glyph">
+            <WifiOff size={13} className="c-red" />
           </span>
           <span className="sidebar-status-text">
             <span className="c-subtext clamp3">{state.message}</span>
@@ -272,8 +212,8 @@ function ConnectionStatus({ connection, onNew }: { connection: ServerConnection;
     case "connecting":
       return (
         <div className="sidebar-status">
-          <span className="status-icon">
-            <Spinner size={15} />
+          <span className="status-glyph">
+            <Spinner size={12} />
           </span>
           <span className="c-subtext">{connection.indexSynced ? "Reconnecting…" : "Connecting…"}</span>
         </div>
@@ -282,8 +222,8 @@ function ConnectionStatus({ connection, onNew }: { connection: ServerConnection;
       if (!connection.indexSynced || connection.sessions.size > 0) return null;
       return (
         <button className="sidebar-status" onClick={onNew}>
-          <span className="status-icon">
-            <SquarePen size={15} className="c-overlay" />
+          <span className="status-glyph">
+            <SquarePen size={13} className="c-overlay" />
           </span>
           <span className="c-subtext">Start a session</span>
         </button>

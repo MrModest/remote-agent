@@ -46,7 +46,7 @@ await page.getByRole("button", { name: "Use folder" }).click();
 await page.locator(".harness-row", { hasText: "Fake" }).click();
 await page.getByPlaceholder("What should the agent do?").fill("write a.txt");
 await shot("new-session");
-await page.getByRole("button", { name: "Start" }).click();
+await page.getByRole("button", { name: "Start", exact: true }).click();
 
 step("approval");
 await page.getByRole("button", { name: "Allow", exact: true }).waitFor();
@@ -172,7 +172,7 @@ await page.getByRole("button", { name: "New session" }).first().click();
 await page.locator(".harness-row", { hasText: "Fake" }).click();
 await page.getByLabel("Isolated git worktree").check();
 await page.getByPlaceholder("What should the agent do?").fill("write b.txt");
-await page.getByRole("button", { name: "Start" }).click();
+await page.getByRole("button", { name: "Start", exact: true }).click();
 await page.getByRole("button", { name: "Allow", exact: true }).click();
 await page.getByText("Echo: write b.txt").waitFor();
 await page.getByRole("button", { name: "Session", exact: true }).click();
@@ -203,8 +203,24 @@ await shot("phone-session");
 await page.getByRole("button", { name: "Back" }).click();
 await shot("phone-sessions");
 
-step("collapse the server, which a reload keeps");
+step("sidebar layouts");
 await page.setViewportSize({ width: 1280, height: 820 });
+const layout = async (name) => {
+  await page.getByRole("button", { name: "Settings", exact: true }).first().click();
+  await page.getByLabel("Layout").selectOption(name);
+  await page.getByRole("button", { name: "Done" }).click();
+};
+await page.locator(".list-header", { hasText: "Servers" }).waitFor(); // the Inbox, the default
+await layout("columns");
+await page.locator(".session-column .session-row").first().waitFor();
+await page.locator(".collection-row", { hasText: project }).click();
+await page.locator(".session-column .bar-title", { hasText: project }).waitFor();
+await shot("layout-columns");
+await layout("projects");
+await page.locator(".project-row", { hasText: project }).waitFor();
+await shot("layout-projects");
+
+step("collapse the server, which a reload keeps");
 const header = page.locator(".server-header-main");
 await header.click();
 await page.locator(".server-header-main[aria-expanded=false]").waitFor();

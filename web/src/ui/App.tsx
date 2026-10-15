@@ -1,7 +1,9 @@
 import { ChevronRight, ChevronsUpDown, MessagesSquare, Monitor, Pencil, Plus, RefreshCw, Settings, Trash2, MessageCircleQuestion } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { Session } from "../protocol/models";
 import { pairingLinkInHash } from "../protocol/pairing";
-import { useObserved } from "../store/observable";
+import { useObserved, useObservedAll } from "../store/observable";
+import { storage } from "../store/storage";
 import type { ServerConnection } from "../store/serverConnection";
 import type { SavedServer, ServerStore } from "../store/serverStore";
 import { AddServer } from "./AddServer";
@@ -11,12 +13,22 @@ import { NewSession } from "./NewSession";
 import { Confirm, Empty, Menu } from "./primitives";
 import { navigate, useRoute, useWide, type Route } from "./router";
 import { ServerHome } from "./ServerHome";
+import { CollectionsSidebar, SessionListColumn } from "./ColumnsSidebar";
 import { reconnect, SessionsSidebar, type ServerActions } from "./SessionsSidebar";
+import { ArchiveConfirm } from "./SessionRow";
+import { useSettings } from "./settings";
+import { collectionSessions, parseCollection, storedCollection, type SessionCollection } from "./sidebarLayout";
 import { SessionView } from "./SessionView";
 import { SettingsView } from "./SettingsView";
 
 /** Sheets over the page. */
-type Sheet = { kind: "pair"; link?: string } | { kind: "new"; connection: ServerConnection } | { kind: "settings" } | { kind: "remove"; server: SavedServer } | { kind: "rename"; server: SavedServer };
+type Sheet =
+  | { kind: "pair"; link?: string }
+  | { kind: "new"; connection: ServerConnection }
+  | { kind: "settings" }
+  | { kind: "archive"; connection: ServerConnection; session: Session }
+  | { kind: "remove"; server: SavedServer }
+  | { kind: "rename"; server: SavedServer };
 
 export function App({ store }: { store: ServerStore }) {
   return (
@@ -73,6 +85,7 @@ function Root() {
     remove: (s) => setSheet({ kind: "remove", server: s }),
     rename: (s) => setSheet({ kind: "rename", server: s }),
     newSession: (c) => setSheet({ kind: "new", connection: c }),
+    archive: (c, s) => setSheet({ kind: "archive", connection: c, session: s }),
   };
 
   let page;
@@ -111,6 +124,7 @@ function Root() {
         </ConnectionContext.Provider>
       )}
       {sheet?.kind === "settings" && <SettingsView onClose={() => setSheet(undefined)} />}
+      {sheet?.kind === "archive" && <ArchiveConfirm connection={sheet.connection} session={sheet.session} onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "remove" && (
         <Confirm
           title={`Remove ${sheet.server.name}?`}
@@ -138,37 +152,86 @@ function Root() {
 }
 
 /** The iPad and Mac layout: every server's sessions in the sidebar, the
- *  chosen session beside them. */
+ *  chosen session beside them, or in the Columns layout, a list of sessions
+ *  between the two. */
 function Split({ route, connection, actions }: { route: Route; connection: ServerConnection | undefined; actions: ServerActions }) {
   const store = useServerStore();
-  useObserved(connection);
+  const { sidebarLayout: layout } = useSettings();
+  const connections = store.servers.map((s) => store.connection(s));
+  useObservedAll(connections);
+  const [collection, setCollection] = useCollection();
+
+  // Every server connects; one that was given up on waits for a click.
+  useEffect(() => {
+    for (const c of connections) if (c.state.kind === "idle") c.start();
+  }, [store.servers]);
+
+  // In three columns, a session opened from elsewhere, such as a link or a
+  // new session, shows in the list: when the collection doesn't have it,
+  // All Sessions or Archived does.
+  const open = connection && route.sessionID ? connection.sessions.get(route.sessionID) : undefined;
+  useEffect(() => {
+    if (layout !== "columns" || !open || !connection) return;
+    const shown = collectionSessions(collection, store).some((i) => i.connection === connection && i.session.id === open.id);
+    if (!shown) setCollection({ kind: open.archived ? "archived" : "all" });
+  }, [layout, connection?.server.id, open?.id, open?.archived]);
+
+  const detail = (
+    <main className="detail">
+      {connection && route.sessionID ? (
+        connection.indexSynced && !connection.sessions.has(route.sessionID) ? (
+          <Empty icon={MessageCircleQuestion} title="Session not found">
+            <p>It is no longer on {connection.server.name}.</p>
+          </Empty>
+        ) : (
+          <ConnectionContext.Provider value={connection}>
+            {/* A new identity per session, so the draft and the subscription don't carry over. */}
+            <SessionView key={connection.server.id + route.sessionID} sessionID={route.sessionID} />
+          </ConnectionContext.Provider>
+        )
+      ) : store.servers.length === 0 ? (
+        <NoServers onPair={actions.pair} />
+      ) : (
+        <Empty icon={MessagesSquare} title="No session selected">
+          <p>Choose a session in the sidebar, or start a new one.</p>
+        </Empty>
+      )}
+    </main>
+  );
+
+  if (layout === "columns") {
+    return (
+      <div className="split columns">
+        <aside className="sidebar">
+          <CollectionsSidebar collection={collection} setCollection={setCollection} actions={actions} />
+        </aside>
+        <section className="session-column" aria-label="Sessions">
+          <SessionListColumn collection={collection} route={route} actions={actions} />
+        </section>
+        {detail}
+      </div>
+    );
+  }
   return (
     <div className="split">
       <aside className="sidebar">
-        <SessionsSidebar route={route} actions={actions} />
+        <SessionsSidebar layout={layout} route={route} actions={actions} />
       </aside>
-      <main className="detail">
-        {connection && route.sessionID ? (
-          connection.indexSynced && !connection.sessions.has(route.sessionID) ? (
-            <Empty icon={MessageCircleQuestion} title="Session not found">
-              <p>It is no longer on {connection.server.name}.</p>
-            </Empty>
-          ) : (
-            <ConnectionContext.Provider value={connection}>
-              {/* A new identity per session, so the draft and the subscription don't carry over. */}
-              <SessionView key={connection.server.id + route.sessionID} sessionID={route.sessionID} />
-            </ConnectionContext.Provider>
-          )
-        ) : store.servers.length === 0 ? (
-          <NoServers onPair={actions.pair} />
-        ) : (
-          <Empty icon={MessagesSquare} title="No session selected">
-            <p>Choose a session in the sidebar, or start a new one.</p>
-          </Empty>
-        )}
-      </main>
+      {detail}
     </div>
   );
+}
+
+const collectionKey = "sessionCollection";
+
+/** The Columns layout's collection, kept across visits. */
+function useCollection() {
+  const [c, setC] = useState<SessionCollection>(() => parseCollection(storage.get(collectionKey)) ?? { kind: "all" });
+  const set = (next: SessionCollection) => {
+    storage.set(collectionKey, storedCollection(next));
+    setC(next);
+  };
+  return [c, set] as const;
 }
 
 function NoServers({ onPair }: { onPair: () => void }) {

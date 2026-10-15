@@ -1,5 +1,6 @@
 import { Observable, useObserved } from "../store/observable";
 import { storage } from "../store/storage";
+import type { SidebarLayout } from "./sidebarLayout";
 
 export type Appearance = "system" | "dark" | "light";
 
@@ -40,6 +41,7 @@ class Settings extends Observable {
   codeFont = "";
   diffWrap = true;
   terminalPlacement: TerminalPlacement = "over";
+  sidebarLayout: SidebarLayout = "inbox";
 
   constructor() {
     super();
@@ -52,9 +54,11 @@ class Settings extends Observable {
     this.diffWrap = storage.get("diffWrap") !== "false";
     const t = storage.get("terminalPlacement");
     if (t === "below" || t === "right") this.terminalPlacement = t;
+    const l = storage.get("sidebarLayout");
+    if (l === "projects" || l === "columns") this.sidebarLayout = l;
   }
 
-  update(patch: Partial<Pick<Settings, "appearance" | "interface" | "messages" | "messageFont" | "codeFont" | "diffWrap" | "terminalPlacement">>) {
+  update(patch: Partial<Pick<Settings, "appearance" | "interface" | "messages" | "messageFont" | "codeFont" | "diffWrap" | "terminalPlacement" | "sidebarLayout">>) {
     Object.assign(this, patch);
     storage.set("appearance", this.appearance);
     storage.set("interfaceTextSize", String(this.interface));
@@ -63,6 +67,7 @@ class Settings extends Observable {
     storage.set("codeFont", this.codeFont);
     storage.set("diffWrap", String(this.diffWrap));
     storage.set("terminalPlacement", this.terminalPlacement);
+    storage.set("sidebarLayout", this.sidebarLayout);
     this.changed();
     this.apply();
   }
@@ -74,12 +79,13 @@ class Settings extends Observable {
       this.messages === defaultMessages &&
       !this.messageFont &&
       !this.codeFont &&
-      this.terminalPlacement === "over"
+      this.terminalPlacement === "over" &&
+      this.sidebarLayout === "inbox"
     );
   }
 
   restoreDefaults() {
-    this.update({ appearance: "system", interface: defaultInterface, messages: defaultMessages, messageFont: "", codeFont: "", terminalPlacement: "over" });
+    this.update({ appearance: "system", interface: defaultInterface, messages: defaultMessages, messageFont: "", codeFont: "", terminalPlacement: "over", sidebarLayout: "inbox" });
   }
 
   private dark = matchMedia("(prefers-color-scheme: dark)");

@@ -454,10 +454,12 @@ svg { flex: none; }
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 8px;
   border-radius: var(--r-selection);
+  font-size: 0.85em;
   font-weight: 600;
+  color: var(--subtext);
 }
 .server-header-name {
   min-width: 0;
@@ -497,6 +499,139 @@ svg { flex: none; }
 }
 .server-header-main:hover,
 button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%, transparent); }
+
+/* The sidebar's layouts (Inbox, Projects, Columns), as on iPad and the Mac. */
+.split.columns { grid-template-columns: clamp(190px, 17vw, 260px) clamp(280px, 27vw, 400px) minmax(0, 1fr); }
+.session-column {
+  background: var(--base);
+  border-right: 1px solid var(--surface0);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.list-header.c-yellow { color: var(--yellow); }
+.count-pill {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--yellow);
+  color: var(--on-accent);
+}
+.group-gap { margin-top: 10px; }
+.session-row.compact .session-row-main,
+.session-row.three-line .session-row-main { gap: 8px; padding: 6px 8px; }
+.session-row.three-line .session-row-main { padding: 8px; }
+.session-row.tree .session-row-main { align-items: center; gap: 8px; padding: 4px 8px 4px 30px; }
+.session-row.tree .status-glyph { margin-top: 0; }
+.row-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.medium { font-weight: 500; }
+.row-place {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.85em;
+  color: var(--subtext);
+  white-space: nowrap;
+}
+.three-line .row-place { color: var(--overlay); }
+.row-activity { font-size: 0.9em; color: var(--subtext); }
+.row-activity.c-red { color: var(--red); }
+.row-branch-glyph { display: inline-flex; flex: none; color: var(--overlay); }
+.short-age {
+  flex: none;
+  font-size: 0.8em;
+  color: var(--overlay);
+  font-variant-numeric: tabular-nums;
+}
+.status-glyph {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-top: 1px;
+}
+.idle-ring {
+  width: 7px;
+  height: 7px;
+  border: 1.25px solid var(--overlay);
+  border-radius: 50%;
+}
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 2px 4px 2px 8px;
+  border-radius: var(--r-selection);
+  font-size: 0.95em;
+}
+.server-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-row-action { visibility: hidden; color: var(--subtext); }
+.server-row:hover .server-row-action,
+.server-row:focus-within .server-row-action,
+.server-row-action[aria-expanded="true"] { visibility: visible; }
+/* On hover, the + takes the count's place. */
+.server-row-plus { display: none; color: var(--subtext); }
+.server-row:hover .server-row-plus,
+.server-row:focus-within .server-row-plus { display: inline-flex; }
+.server-row:hover .server-row-count,
+.server-row:focus-within .server-row-count { display: none; }
+@media (hover: none) {
+  .server-row-action { visibility: visible; }
+  .server-row-plus { display: inline-flex; }
+}
+.project-row,
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 5px 8px;
+  border-radius: var(--r-selection);
+  text-align: start;
+}
+.project-row { font-weight: 500; }
+.collection-row { width: 100%; margin: 0; gap: 10px; padding: 6px 8px; }
+.project-row:hover,
+.collection-row:hover { background: color-mix(in srgb, var(--surface0) 50%, transparent); }
+.collection-row.selected { background: var(--surface0); }
+.project-row-name,
+.collection-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-row-name { flex: 1; }
+.bar-count {
+  font-size: 0.72em;
+  font-weight: 400;
+  color: var(--subtext);
+}
 
 .sidebar-foot {
   border-top: 1px solid var(--crust);

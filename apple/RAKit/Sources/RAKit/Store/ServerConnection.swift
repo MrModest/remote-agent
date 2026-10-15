@@ -44,6 +44,10 @@ public final class ServerConnection {
     @ObservationIgnored var pingTimeout: Double = 5
     private var messagesTask: Task<Void, Never>?
     private let onURLWorked: (URL) -> Void
+    /// Called with a session in the index that changed, before and after:
+    /// live, or while this device was away, in the replay after reconnecting.
+    /// Not for the sessions the first sync brings.
+    @ObservationIgnored public var onSessionChange: ((_ old: Session, _ new: Session) -> Void)?
 
     init(server: SavedServer, token: String, defaults: UserDefaults = .standard, onURLWorked: @escaping (URL) -> Void) {
         self.server = server
@@ -157,16 +161,20 @@ public final class ServerConnection {
             else if let s = store(forStream: stream) { s.apply(events) }
         case .synchronized(let stream, let seq, let reset):
             if stream == "index" {
+                // A reset drops what was cached, but the replay is still
+                // compared with it.
+                let before = sessions
                 if reset { projects = [:]; sessions = [:] }
                 let buffered = indexReplay
                 indexReplay = []
-                for ev in buffered { upsertIndex(ev) }
+                let changes = buffered.compactMap { upsertIndex($0, before: before) }
                 indexSeq = seq
                 indexOutstanding = max(0, indexOutstanding - 1)
                 indexLive = indexOutstanding == 0
                 indexSynced = true
                 for (id, s) in sessions { sessionStores[id]?.session = sessionStores[id]?.session ?? s }
                 drafts.keep { sessions[$0] != nil }
+                report(changes)
             } else if let s = store(forStream: stream) {
                 s.synchronized(seq: seq, reset: reset)
             }
@@ -193,6 +201,8 @@ public final class ServerConnection {
             indexReplay.append(contentsOf: events)
             return
         }
+        var changes: [SessionChange] = []
+        defer { report(changes) }
         for ev in events {
             if ev.seq <= indexSeq { continue }
             if ev.seq != indexSeq + 1 {
@@ -201,15 +211,24 @@ public final class ServerConnection {
                 return
             }
             indexSeq = ev.seq
-            upsertIndex(ev)
+            if let c = upsertIndex(ev) { changes.append(c) }
         }
     }
 
-    private func upsertIndex(_ ev: Event) {
+    private typealias SessionChange = (old: Session, new: Session)
+
+    /// Applies an index event, and returns the session it changed. A session
+    /// is compared with the one cached, else with the one in `before`.
+    private func upsertIndex(_ ev: Event, before: [String: Session] = [:]) -> SessionChange? {
         switch ev.type {
         case "project.upserted": if let p = ev.project { projects[p.id] = p }
         case "project.removed": if let id = ev.id { projects[id] = nil }
-        case "session.upserted": if let s = ev.session { sessions[s.id] = s }
+        case "session.upserted":
+            if let s = ev.session {
+                let old = sessions[s.id] ?? before[s.id]
+                sessions[s.id] = s
+                if let old, old != s { return (old, s) }
+            }
         case "session.removed":
             if let id = ev.id {
                 sessions[id] = nil
@@ -217,6 +236,12 @@ public final class ServerConnection {
             }
         default: break
         }
+        return nil
+    }
+
+    /// Called once the batch they came in is applied, so the index is whole.
+    private func report(_ changes: [SessionChange]) {
+        for c in changes { onSessionChange?(c.old, c.new) }
     }
 
     private func subscribeIndex() async {
@@ -411,6 +436,10 @@ public final class ServerConnection {
     public var sortedProjects: [Project] {
         projects.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
+}
+
+extension ServerConnection {
+    func _testHandle(_ msg: ServerMessage) { handle(msg) }
 }
 
 struct SubscribeParams: Encodable, Sendable {

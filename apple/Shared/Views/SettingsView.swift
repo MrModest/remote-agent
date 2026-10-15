@@ -77,6 +77,10 @@ struct SettingsView: View {
                     }
                 }
 
+                #if os(macOS)
+                NotificationsSection()
+                #endif
+
                 Section {
                     Button("Restore Defaults", action: restoreDefaults)
                         .disabled(isDefault)
@@ -229,6 +233,39 @@ private struct SizeSlider: View {
         .accessibilityValue(text)
     }
 }
+
+#if os(macOS)
+/// Turns notifications on and off, and says when macOS holds them back.
+private struct NotificationsSection: View {
+    @Environment(Notifier.self) private var notifier
+    @Environment(\.openURL) private var openURL
+    @AppStorage(Notifier.enabledKey) private var enabled = true
+
+    var body: some View {
+        Section {
+            Toggle("Show notifications", isOn: $enabled)
+            if blocked {
+                Button("Open System Settings") {
+                    let id = Bundle.main.bundleIdentifier ?? ""
+                    openURL(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")!)
+                }
+            }
+        } header: {
+            Text("Notifications").formHeaderFont()
+        } footer: {
+            Text(blocked ? "Remote Agent's notifications are turned off in System Settings."
+                         : "When a session needs you, finishes or fails, unless the window shows it.")
+                .formFooterFont()
+        }
+        .onChange(of: enabled) { _, on in
+            if on { Task { await notifier.requestAuthorization() } }
+        }
+        .task { await notifier.refreshAuthorization() }
+    }
+
+    private var blocked: Bool { enabled && notifier.authorization == .denied }
+}
+#endif
 
 #if os(iOS)
 extension EnvironmentValues {

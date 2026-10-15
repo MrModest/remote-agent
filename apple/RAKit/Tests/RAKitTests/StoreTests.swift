@@ -85,6 +85,90 @@ struct SessionStoreTests {
     }
 }
 
+func sessionEvent(_ seq: Int64, _ id: String, _ status: String, archived: Bool = false, error: String? = nil) throws -> Event {
+    var obj: [String: Any] = ["id": id, "projectId": "p", "harness": "fake", "status": status, "title": id, "archived": archived,
+                              "workspace": ["kind": "root", "path": "/tmp/p"],
+                              "createdAt": "2026-10-09T12:00:00Z", "updatedAt": "2026-10-09T12:00:\(String(format: "%02d", seq % 60))Z"]
+    if let error { obj["error"] = error }
+    let data = try JSONSerialization.data(withJSONObject: ["stream": "index", "seq": seq, "type": "session.upserted", "session": obj])
+    return try WireCoding.decoder().decode(Event.self, from: data)
+}
+
+struct SessionAlertTests {
+    func alert(_ from: String, _ to: String, archived: Bool = false) throws -> SessionAlert? {
+        let old = try #require(try sessionEvent(1, "s", from).session)
+        let new = try #require(try sessionEvent(2, "s", to, archived: archived, error: to == "error" ? "boom" : nil).session)
+        return SessionAlert(from: old, to: new)
+    }
+
+    @Test func fromStatusChanges() throws {
+        #expect(try alert("idle", "running") == nil)
+        #expect(try alert("running", "awaiting_approval") == .needsYou)
+        #expect(try alert("idle", "awaiting_approval") == .needsYou)
+        #expect(try alert("awaiting_approval", "running") == nil)
+        #expect(try alert("running", "idle") == .finished)
+        // Answered elsewhere and done, or interrupted: nothing to tell.
+        #expect(try alert("awaiting_approval", "idle") == nil)
+        #expect(try alert("running", "error") == .failed("boom"))
+        #expect(try alert("idle", "error") == .failed("boom"))
+        #expect(try alert("running", "running") == nil)
+        #expect(try alert("running", "idle", archived: true) == nil)
+        #expect(try alert("running", "stopped") == nil)
+    }
+}
+
+@MainActor
+struct IndexChangeTests {
+    let server = SavedServer(id: "srv", name: "Test", urls: [URL(string: "http://127.0.0.1:1")!], deviceId: "d", addedAt: .now)
+
+    func connection() -> (ServerConnection, () -> [String]) {
+        let c = ServerConnection(server: server, token: "", defaults: UserDefaults(suiteName: "dev.remote-agent.IndexChangeTests")!) { _ in }
+        var seen: [String] = []
+        c.onSessionChange = { [unowned c] old, new in
+            // Reported once the batch is applied.
+            #expect(c.sessions[new.id] == new)
+            if let alert = SessionAlert(from: old, to: new) { seen.append("\(new.id) \(alert)") }
+        }
+        return (c, { seen })
+    }
+
+    @Test func notForTheFirstSync() throws {
+        let (c, seen) = connection()
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(3, "a", "running")]))
+        c._testHandle(.synchronized(stream: "index", seq: 3, reset: true))
+        #expect(seen().isEmpty)
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(4, "a", "awaiting_approval"), try sessionEvent(5, "b", "running")]))
+        #expect(seen() == ["a needsYou"])
+    }
+
+    @Test func whileAway() throws {
+        let (c, seen) = connection()
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(2, "a", "running"), try sessionEvent(3, "b", "running")]))
+        c._testHandle(.synchronized(stream: "index", seq: 3, reset: true))
+        // Back after a sleep: the replay holds what changed meanwhile.
+        c._testHandle(.closed(reason: nil))
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(7, "a", "idle")]))
+        c._testHandle(.synchronized(stream: "index", seq: 7, reset: false))
+        #expect(seen() == ["a finished"])
+        // The server lost its place: a reset, compared with what was cached.
+        c._testHandle(.closed(reason: nil))
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(1, "a", "idle"), try sessionEvent(2, "b", "error", error: "boom")]))
+        c._testHandle(.synchronized(stream: "index", seq: 2, reset: true))
+        #expect(seen() == ["a finished", #"b failed(Optional("boom"))"#])
+    }
+
+    @Test func onceForARepeatedReplay() throws {
+        let (c, seen) = connection()
+        c._testHandle(.events(stream: "index", events: [try sessionEvent(2, "a", "running")]))
+        c._testHandle(.synchronized(stream: "index", seq: 2, reset: true))
+        c._testHandle(.closed(reason: nil))
+        let replay = try sessionEvent(5, "a", "awaiting_approval")
+        c._testHandle(.events(stream: "index", events: [replay, replay]))
+        c._testHandle(.synchronized(stream: "index", seq: 5, reset: false))
+        #expect(seen() == ["a needsYou"])
+    }
+}
+
 /// Drafts stay on the device, by server and session.
 @MainActor @Suite(.serialized)
 struct DraftTests {

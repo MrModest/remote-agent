@@ -6,14 +6,22 @@ import AppKit
 
 @main
 struct RemoteAgentApp: App {
-    @State private var store = ServerStore()
+    @State private var store: ServerStore
     @Environment(\.scenePhase) private var phase
-
     #if os(macOS)
+    @State private var notifier: Notifier
+
     init() {
         // The app has one window: without this, "Prefer tabs when opening
         // documents" would still give it a tab bar and the View menu its items.
         NSWindow.allowsAutomaticWindowTabbing = false
+        let store = ServerStore()
+        _store = State(initialValue: store)
+        _notifier = State(initialValue: Notifier(store: store))
+    }
+    #else
+    init() {
+        _store = State(initialValue: ServerStore())
     }
     #endif
 
@@ -31,6 +39,7 @@ struct RemoteAgentApp: App {
         #if os(macOS)
         Settings {
             SettingsView()
+                .environment(notifier)
                 .frame(width: 460)
                 // As tall as the form, which grows with the text sizes. The
                 // form can still come out a fraction of a point taller, which
@@ -50,6 +59,7 @@ struct RemoteAgentApp: App {
         Window("Remote Agent", id: "main") {
             WindowRoot()
                 .environment(store)
+                .environment(notifier)
         }
         .defaultSize(width: 1100, height: 760)
         .commands { AppCommands() }

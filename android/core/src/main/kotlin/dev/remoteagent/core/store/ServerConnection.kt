@@ -98,6 +98,12 @@ class ServerConnection(
     internal var firstRetryDelay: Duration = 1.seconds
     /** Cuts the run loop's wait short: the socket closed, so reconnect now. */
     private val wake = Channel<Unit>(Channel.CONFLATED)
+    /**
+     * Called with a session in the index that changed, before and after:
+     * live, or while this device was away, in the replay after reconnecting.
+     * Not for the sessions the first sync brings.
+     */
+    var onSessionChange: ((old: Session, new: Session) -> Unit)? = null
 
     init {
         scope.launch { for (msg in client.messages) handle(msg) }
@@ -200,17 +206,19 @@ class ServerConnection(
 
     // Messages
 
-    private fun handle(msg: ServerMessage) {
+    internal fun handle(msg: ServerMessage) {
         when (msg) {
             is ServerMessage.Events ->
                 if (msg.stream == "index") applyIndex(msg.events) else store(msg.stream)?.apply(msg.events)
             is ServerMessage.Synchronized ->
                 if (msg.stream == "index") {
+                    // A reset drops what was cached, but the replay is still compared with it.
+                    val before = _sessions.value
                     val projects = if (msg.reset) HashMap() else HashMap(_projects.value)
-                    val sessions = if (msg.reset) HashMap() else HashMap(_sessions.value)
+                    val sessions = if (msg.reset) HashMap() else HashMap(before)
                     val buffered = indexReplay
                     indexReplay = mutableListOf()
-                    for (ev in buffered) upsertIndex(ev, projects, sessions)
+                    val changes = buffered.mapNotNull { upsertIndex(it, projects, sessions, before) }
                     _projects.value = projects
                     _sessions.value = sessions
                     indexSeq = msg.seq
@@ -222,6 +230,7 @@ class ServerConnection(
                         if (store.session.value == null) store.setSession(s)
                     }
                     drafts.keep { it in sessions }
+                    report(changes)
                 } else {
                     store(msg.stream)?.synchronized(msg.seq, msg.reset)
                 }
@@ -255,6 +264,7 @@ class ServerConnection(
         }
         val projects = HashMap(_projects.value)
         val sessions = HashMap(_sessions.value)
+        val changes = mutableListOf<Pair<Session, Session>>()
         for (ev in events) {
             if (ev.seq <= indexSeq) continue
             if (ev.seq != indexSeq + 1) {
@@ -263,22 +273,42 @@ class ServerConnection(
                 break
             }
             indexSeq = ev.seq
-            upsertIndex(ev, projects, sessions)
+            upsertIndex(ev, projects, sessions)?.let { changes += it }
         }
         _projects.value = projects
         _sessions.value = sessions
+        report(changes)
     }
 
-    private fun upsertIndex(ev: Event, projects: MutableMap<String, Project>, sessions: MutableMap<String, Session>) {
+    /**
+     * Applies an index event, and returns the session it changed, before and
+     * after. A session is compared with the one in `sessions`, else with the
+     * one in `before`.
+     */
+    private fun upsertIndex(
+        ev: Event,
+        projects: MutableMap<String, Project>,
+        sessions: MutableMap<String, Session>,
+        before: Map<String, Session> = emptyMap(),
+    ): Pair<Session, Session>? {
         when (ev.type) {
             "project.upserted" -> ev.project?.let { projects[it.id] = it }
             "project.removed" -> ev.id?.let { projects.remove(it) }
-            "session.upserted" -> ev.session?.let { sessions[it.id] = it }
+            "session.upserted" -> ev.session?.let {
+                val old = sessions.put(it.id, it) ?: before[it.id]
+                if (old != null && old != it) return old to it
+            }
             "session.removed" -> ev.id?.let {
                 sessions.remove(it)
                 drafts[it] = ""
             }
         }
+        return null
+    }
+
+    /** Called once the batch they came in is applied, so the index is whole. */
+    private fun report(changes: List<Pair<Session, Session>>) {
+        for ((old, new) in changes) onSessionChange?.invoke(old, new)
     }
 
     private suspend fun subscribeIndex() {

@@ -11,6 +11,7 @@ Drive coding agents running on your computer from your iPhone, iPad, Mac, an And
   - approve or deny tool calls
   - answer the agent's questions
   - review per-turn git diffs and revert them
+  - get a notification on the Mac when a session needs you or finishes
 - **Web client**: the same app for a browser, in `web/` (React and TypeScript). In a wide window it has the iPad's sidebar of every server's sessions. For now you run it from its dev server on your computer; see [Running the web client](#running-the-web-client).
 - **Android app**: the same app, native, for Android 16 or later, in `android/` (Kotlin and Jetpack Compose). On a tablet, as on iPad, one sidebar lists every server's sessions next to the one you have open. See [Installing the app on Android](#installing-the-app-on-android).
 
@@ -256,6 +257,10 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
   - On the Mac, iPad and the web client in a wide window, Settings › Terminal picks where it opens: instead of the messages, below them, or in a sidebar on the right. On an iPhone, or in a narrow window, it takes the place of the messages.
   - ⌘J or ⌘` shows and hides it, with a keyboard on iPad too; hiding it puts you back in the prompt. In the web client Ctrl works as well, except inside the terminal, where Ctrl+J and Ctrl+` go to the shell.
   - On iPhone and iPad, the bar above the keyboard has Esc, Ctrl, Tab and the arrow keys; the web client shows similar keys on touch screens.
+- **Notifications:** the Mac app and the web client tell you when a session on any server needs you (an approval, a question or a plan), finishes its turn, or fails. Nothing comes for the session the window shows while it's in front. A click opens the session, and a notification that a session needs you goes away once you answer it, on any device.
+  - On the Mac they're on from the start, once you allow them; Settings › Notifications turns them off. They come while the app runs, even with its window behind others.
+  - In the web client, turn them on in Settings › Notifications, and the browser asks to allow them. They come while the page is open, in any tab or window, and need the page on `localhost` or https: browsers have no notifications on plain http elsewhere, such as a Tailscale address.
+  - The apps go by a session's status, so a turn that ended with an error from the agent, or that you stopped, also shows as finished.
 - **Connection:** when a server can't be reached, the apps try five times, over about 15 seconds, then stop and show why. Retrying, opening the server, or a click on its name in the sidebar (on iPad, the Mac, an Android tablet or a wide browser window) tries again, and so does coming back to the app.
 - **Stop:** this interrupts the current turn. *Force stop* kills the agent process. Idle agents are stopped after `idle_timeout` and resume transparently on the next prompt.
 - **Queued prompts:** a prompt sent while the agent works waits, marked *Queued*, and goes out when the turn ends. *Send now* under it stops the turn and sends that prompt at once, ahead of any others waiting. Stop cancels them all.

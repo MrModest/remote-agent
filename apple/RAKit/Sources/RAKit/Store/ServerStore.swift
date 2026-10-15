@@ -16,6 +16,9 @@ public final class ServerStore {
     // A cache filled lazily from view bodies; not UI state, so not observed
     // (mutating observed state during a view update makes navigation stutter).
     @ObservationIgnored private var connections: [String: ServerConnection] = [:]
+    /// Called with a session that changed on any server, and its connection:
+    /// see `ServerConnection.onSessionChange`.
+    @ObservationIgnored public var onSessionChange: ((ServerConnection, _ old: Session, _ new: Session) -> Void)?
     private let defaults: UserDefaults
     private static let key = "servers.v1"
 
@@ -35,6 +38,9 @@ public final class ServerStore {
         if let c = connections[server.id] { return c }
         let c = ServerConnection(server: server, token: Keychain.get(server.id) ?? "", defaults: defaults) { [weak self] url in
             self?.promote(url, for: server.id)
+        }
+        c.onSessionChange = { [weak self, weak c] old, new in
+            if let self, let c { self.onSessionChange?(c, old, new) }
         }
         connections[server.id] = c
         return c

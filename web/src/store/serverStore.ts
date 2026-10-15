@@ -1,3 +1,4 @@
+import type { Session } from "../protocol/models";
 import { pair, type PairingLink } from "../protocol/pairing";
 import { Observable } from "./observable";
 import { ServerConnection } from "./serverConnection";
@@ -20,6 +21,9 @@ const tokenKey = (id: string) => "token." + id;
 export class ServerStore extends Observable {
   servers: SavedServer[] = [];
   private connections = new Map<string, ServerConnection>();
+  /** Called with a session that changed on any server, and its connection:
+   *  see `ServerConnection.onSessionChange`. */
+  onSessionChange: ((connection: ServerConnection, old: Session, next: Session) => void) | undefined;
 
   constructor() {
     super();
@@ -54,7 +58,9 @@ export class ServerStore extends Observable {
   connection(server: SavedServer): ServerConnection {
     let c = this.connections.get(server.id);
     if (!c) {
-      c = new ServerConnection(server, storage.get(tokenKey(server.id)) ?? "", (url) => this.promote(url, server.id));
+      const created = new ServerConnection(server, storage.get(tokenKey(server.id)) ?? "", (url) => this.promote(url, server.id));
+      created.onSessionChange = (old, next) => this.onSessionChange?.(created, old, next);
+      c = created;
       this.connections.set(server.id, c);
     }
     return c;

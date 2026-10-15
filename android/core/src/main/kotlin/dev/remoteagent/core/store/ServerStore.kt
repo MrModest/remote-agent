@@ -6,6 +6,7 @@ import dev.remoteagent.core.net.Http
 import dev.remoteagent.core.net.Pairing
 import dev.remoteagent.core.net.PairingLink
 import dev.remoteagent.core.protocol.InstantSerializer
+import dev.remoteagent.core.protocol.Session
 import dev.remoteagent.core.protocol.WireCoding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +43,8 @@ class ServerStore(
     private val _servers = MutableStateFlow(load())
     val servers: StateFlow<List<SavedServer>> = _servers.asStateFlow()
     private val connections = HashMap<String, ServerConnection>()
+    /** Called with a session that changed on any server, and its connection: see `ServerConnection.onSessionChange`. */
+    var onSessionChange: ((connection: ServerConnection, old: Session, new: Session) -> Unit)? = null
 
     private fun load(): List<SavedServer> = storage[KEY]?.let {
         runCatching { WireCoding.json.decodeFromString(ListSerializer(SavedServer.serializer()), it) }.getOrNull()
@@ -55,7 +58,9 @@ class ServerStore(
     fun server(id: String): SavedServer? = _servers.value.firstOrNull { it.id == id }
 
     fun connection(server: SavedServer): ServerConnection = connections.getOrPut(server.id) {
-        ServerConnection(server, tokens.get(server.id) ?: "", scope, imageCache, { url -> promote(url, server.id) }, http, storage)
+        ServerConnection(server, tokens.get(server.id) ?: "", scope, imageCache, { url -> promote(url, server.id) }, http, storage).also { c ->
+            c.onSessionChange = { old, new -> onSessionChange?.invoke(c, old, new) }
+        }
     }
 
     /** Pairs with a server from a pairing link and saves it. */

@@ -11,6 +11,9 @@ struct ServerSplitView: View {
     /// The open session, as "<server id> <session id>", or "" for none.
     @AppStorage("openSession") private var openSession = ""
     @State private var showAdd = false
+    #if os(macOS)
+    @Environment(Notifier.self) private var notifier
+    #endif
 
     /// The open session, while its server is still paired.
     private var route: SessionRoute? {
@@ -63,6 +66,15 @@ struct ServerSplitView: View {
             if gone { openSession = "" }
         }
         .focusedSceneValue(\.pairServer, $showAdd)
+        #if os(macOS)
+        .onChange(of: route, initial: true) { _, route in notifier.shown = route }
+        .onChange(of: notifier.opened, initial: true) { _, route in
+            // A click on a notification, which may have launched the app.
+            guard let route else { return }
+            selection.wrappedValue = route
+            notifier.opened = nil
+        }
+        #endif
     }
 
     @ViewBuilder private var detail: some View {

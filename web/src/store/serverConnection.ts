@@ -8,6 +8,8 @@ import type { SavedServer } from "./serverStore";
 import { SessionStore, type SessionHost } from "./sessionStore";
 import { TerminalSession } from "./terminalSession";
 
+type SessionChange = [old: Session, next: Session];
+
 export type ConnectionState =
   | { kind: "idle" }
   | { kind: "connecting" }
@@ -59,6 +61,10 @@ export class ServerConnection extends Observable implements SessionHost {
   firstRetryDelay = 1;
   /** Seconds a socket may stay silent before it's pinged. */
   heartbeat = 15;
+  /** Called with a session in the index that changed, before and after:
+   *  live, or while this device was away, in the replay after reconnecting.
+   *  Not for the sessions the first sync brings. */
+  onSessionChange: ((old: Session, next: Session) => void) | undefined;
 
   constructor(
     public server: SavedServer,
@@ -226,13 +232,19 @@ export class ServerConnection extends Observable implements SessionHost {
         break;
       case "synchronized":
         if (msg.stream === "index") {
+          // A reset drops what was cached, but the replay is still compared with it.
+          const before = new Map(this.sessions);
           if (msg.reset) {
             this.projects.clear();
             this.sessions.clear();
           }
           const buffered = this.indexReplay;
           this.indexReplay = [];
-          for (const ev of buffered) this.upsertIndex(ev);
+          const changes: SessionChange[] = [];
+          for (const ev of buffered) {
+            const c = this.upsertIndex(ev, before);
+            if (c) changes.push(c);
+          }
           this.indexSeq = msg.seq;
           this.indexOutstanding = Math.max(0, this.indexOutstanding - 1);
           this.indexLive = this.indexOutstanding === 0;
@@ -243,6 +255,7 @@ export class ServerConnection extends Observable implements SessionHost {
           }
           this.drafts.keep((id) => this.sessions.has(id));
           this.changed();
+          this.report(changes);
         } else {
           this.storeForStream(msg.stream)?.synchronized(msg.seq, msg.reset);
         }
@@ -273,6 +286,7 @@ export class ServerConnection extends Observable implements SessionHost {
       this.indexReplay.push(...events);
       return;
     }
+    const changes: SessionChange[] = [];
     for (const ev of events) {
       if (ev.seq <= this.indexSeq) continue;
       if (ev.seq !== this.indexSeq + 1) {
@@ -281,12 +295,16 @@ export class ServerConnection extends Observable implements SessionHost {
         break;
       }
       this.indexSeq = ev.seq;
-      this.upsertIndex(ev);
+      const c = this.upsertIndex(ev);
+      if (c) changes.push(c);
     }
     this.changed();
+    this.report(changes);
   }
 
-  private upsertIndex(ev: Event) {
+  /** Applies an index event, and returns the session it changed. A session
+   *  is compared with the one cached, else with the one in `before`. */
+  private upsertIndex(ev: Event, before?: Map<string, Session>): SessionChange | undefined {
     switch (ev.type) {
       case "project.upserted":
         if (ev.project) this.projects.set(ev.project.id, ev.project);
@@ -294,9 +312,14 @@ export class ServerConnection extends Observable implements SessionHost {
       case "project.removed":
         if (ev.id) this.projects.delete(ev.id);
         break;
-      case "session.upserted":
-        if (ev.session) this.sessions.set(ev.session.id, ev.session);
+      case "session.upserted": {
+        const s = ev.session;
+        if (!s) break;
+        const old = this.sessions.get(s.id) ?? before?.get(s.id);
+        this.sessions.set(s.id, s);
+        if (old && JSON.stringify(old) !== JSON.stringify(s)) return [old, s];
         break;
+      }
       case "session.removed":
         if (ev.id) {
           this.sessions.delete(ev.id);
@@ -304,6 +327,12 @@ export class ServerConnection extends Observable implements SessionHost {
         }
         break;
     }
+    return undefined;
+  }
+
+  /** Called once the batch they came in is applied, so the index is whole. */
+  private report(changes: SessionChange[]) {
+    for (const [old, next] of changes) this.onSessionChange?.(old, next);
   }
 
   private async subscribeIndex() {

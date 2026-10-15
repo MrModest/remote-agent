@@ -2,6 +2,7 @@ import { AArrowDown, AArrowUp } from "lucide-react";
 import { useState } from "react";
 import { UserBubble } from "./items/ItemView";
 import { Markdown } from "./Markdown";
+import { notifications, useNotifications } from "./notifications";
 import { Modal } from "./primitives";
 import { interfaceSizes, messageFonts, messageSizes, settings, terminalPlacements, useSettings, type Appearance, type TerminalPlacement } from "./settings";
 
@@ -90,6 +91,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
         <p className="form-footer">Where a session's terminal opens. In a narrow window it takes the place of the messages.</p>
 
+        <NotificationsSection />
+
         <section className="form-section">
           <button className="form-row link" disabled={s.isDefault} onClick={() => settings.restoreDefaults()}>
             Restore Defaults
@@ -97,6 +100,36 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
       </div>
     </Modal>
+  );
+}
+
+/** Turns notifications on and off, and says when the browser holds them back. */
+function NotificationsSection() {
+  const n = useNotifications();
+  const blocked = n.supported && n.permission === "denied";
+  return (
+    <>
+      <h4 className="form-header">Notifications</h4>
+      <section className="form-section">
+        <label className="form-row">
+          <span>Show notifications</span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={n.enabled}
+            disabled={!n.supported || blocked}
+            onChange={(e) => void notifications.setEnabled(e.target.checked)}
+          />
+        </label>
+      </section>
+      <p className="form-footer">
+        {!n.supported
+          ? "This browser can't show notifications from this page. Pages need https or localhost."
+          : blocked
+            ? "This browser blocks notifications from this page. Allow them in its site settings."
+            : "When a session needs you, finishes or fails, unless this page shows it in front. Only while the page is open."}
+      </p>
+    </>
   );
 }
 

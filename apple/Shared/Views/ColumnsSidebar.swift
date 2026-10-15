@@ -67,6 +67,9 @@ struct CollectionsSidebar: View {
             .environment(\.backgroundProminence, .standard)
         }
         .badge(count)
+        // On the Mac a badge hides the link's value from the list, which then
+        // selects nothing when the row is clicked; the tag gives the value back.
+        .tag(c)
         #if os(iOS)
         .listRowInsets(Metrics.rowInsets)
         #endif

@@ -7,17 +7,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -28,13 +26,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,309 +45,178 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.remoteagent.app.platform.AppSettings
+import dev.remoteagent.app.platform.AppSettings.Keys
 import dev.remoteagent.app.platform.state
-import dev.remoteagent.core.protocol.HarnessInfo
-import dev.remoteagent.core.protocol.Project
-import dev.remoteagent.core.protocol.Session
-import dev.remoteagent.core.protocol.SessionStatus
 import dev.remoteagent.core.store.ConnectionState
-import dev.remoteagent.core.store.SavedServer
-import dev.remoteagent.core.store.ServerConnection
-import dev.remoteagent.core.store.activeSessions
-import dev.remoteagent.core.store.archivedSessions
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * The tablet's list pane: every paired server, each with its sessions. A tap
- * on a server's name shows or hides them, or, once the connection has given
- * up, tries again. Mirrors apple/Shared/Views/SessionsSidebar.swift.
+ * The tablet's list pane beside a session: the Inbox or the Projects layout.
+ * The Columns layout has its own (ColumnsSidebar.kt). The split view around
+ * it shows the dialogs its rows ask for. Mirrors apple/Shared/Views/SessionsSidebar.swift.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsSidebar(
+    layout: SidebarLayout,
+    servers: List<ServerState>,
     selection: SessionKey?,
     onOpenSession: (SessionKey) -> Unit,
     onAdd: () -> Unit,
     onSettings: () -> Unit,
-    onRemoved: (SavedServer) -> Unit,
 ) {
-    val store = LocalStore.current
-    val settings = LocalSettings.current
-    val scope = rememberCoroutineScope()
-    val servers by store.servers.collectAsStateWithLifecycle()
-    // The servers whose sessions are hidden, by id, separated by spaces.
-    val collapsedIDs by settings.state(AppSettings.Keys.collapsedServers, "")
-    val collapsed = remember(collapsedIDs) { collapsedIDs.split(' ').filter { it.isNotEmpty() } }
-    // The servers shown with their archived sessions.
-    var showArchived by rememberSaveable { mutableStateOf(listOf<String>()) }
-    var newSessionOn by rememberSaveable { mutableStateOf<String?>(null) }
-    var newMenu by remember { mutableStateOf(false) }
-    var moreMenu by remember { mutableStateOf(false) }
-    var archiving by remember { mutableStateOf<ArchiveRequest?>(null) }
-    var removing by remember { mutableStateOf<SavedServer?>(null) }
-    var refreshing by remember { mutableStateOf(false) }
-
-    val sections = servers.map { server -> key(server.id) { sectionState(store.connection(server)) } }
-    val connected = sections.filter { it.state == ConnectionState.Connected }
-
-    fun setExpanded(id: String, shown: Boolean) {
-        val ids = collapsed.filter { it != id } + if (shown) emptyList() else listOf(id)
-        // Forgets servers that were removed.
-        settings.put(AppSettings.Keys.collapsedServers, ids.filter { c -> servers.any { it.id == c } }.joinToString(" "))
-    }
-
-    // Every server connects; one that was given up on waits for a tap. Keyed
-    // on the connections, since pairing a server again replaces its own.
-    val connections = sections.map { it.connection }
-    LaunchedEffect(connections) {
-        for (c in connections) if (c.state.value == ConnectionState.Idle) c.start()
-    }
-    // Landing on an archived session, such as one opened before the window
-    // widened, shows its row.
-    val selectionArchived = selection != null &&
-        sections.firstOrNull { it.id == selection.serverId }?.sessions?.get(selection.sessionId)?.archived == true
-    LaunchedEffect(selectionArchived, selection?.serverId) {
-        val id = selection?.serverId
-        if (selectionArchived && id != null && id !in showArchived) showArchived = showArchived + id
-    }
-
     Screen(
         title = { Text("Sessions", style = Type.title) },
         background = palette.mantle,
-        actions = {
-            Box {
-                IconButton(
-                    { if (connected.size == 1) newSessionOn = connected[0].id else newMenu = true },
-                    enabled = connected.isNotEmpty(),
-                    modifier = Modifier.testTag("new-session"),
-                ) {
-                    Icon(painterResource(Icons.newSession), "New session")
-                }
-                DropdownMenu(newMenu, { newMenu = false }, containerColor = palette.mantle) {
-                    for (s in connected) MenuItem("On ${s.name}", Icons.server) { newMenu = false; newSessionOn = s.id }
-                }
-            }
-            // In a menu, as on iPad: a + here would read as a new session, as each server's does.
-            Box {
-                IconButton({ moreMenu = true }) { Icon(painterResource(Icons.more), "More") }
-                DropdownMenu(moreMenu, { moreMenu = false }, containerColor = palette.mantle) {
-                    MenuItem("Pair a server", Icons.add) { moreMenu = false; onAdd() }
-                    MenuItem("Settings", Icons.settings) { moreMenu = false; onSettings() }
-                }
-            }
-        },
+        actions = { SidebarToolbar(servers, onAdd, onSettings) },
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = {
-                scope.launch {
-                    refreshing = true
-                    coroutineScope {
-                        for (s in sections) launch {
-                            if (s.state == ConnectionState.Connected) s.connection.refreshHarnesses(force = true) else s.connection.retry()
-                        }
-                    }
-                    refreshing = false
-                }
-            },
-            modifier = Modifier.fillMaxSize().padding(padding),
-        ) {
-            LazyColumn(Modifier.fillMaxSize()) {
-                sections.forEachIndexed { i, s ->
-                    serverSection(
-                        s,
-                        first = i == 0,
-                        expanded = s.id !in collapsed,
-                        showArchived = s.id in showArchived,
-                        selection = selection?.takeIf { it.serverId == s.id }?.sessionId,
-                        onExpand = { setExpanded(s.id, it) },
-                        onShowArchived = { shown -> showArchived = if (shown) showArchived + s.id else showArchived - s.id },
-                        onOpen = { id -> onOpenSession(SessionKey(s.id, id)) },
-                        onNewSession = { newSessionOn = s.id },
-                        onArchive = { session -> archiving = ArchiveRequest(session, s.connection) },
-                        onRemove = { removing = s.server },
-                    )
-                }
+        SidebarRefresh(servers, Modifier.padding(padding)) {
+            when (layout) {
+                SidebarLayout.PROJECTS -> ProjectsSidebar(servers, selection, onOpenSession)
+                else -> InboxSidebar(servers, selection, onOpenSession)
             }
         }
     }
-
-    ArchiveSessionDialog(archiving, onDismiss = { archiving = null })
-    val removed = removing
-    RemoveServerDialog(removed, onDismiss = { removing = null }, onRemove = { removed?.let(onRemoved) })
-    sections.firstOrNull { it.id == newSessionOn }?.let { s ->
-        NewSessionDialog(s.connection, onDismiss = { newSessionOn = null }, onCreated = { session ->
-            newSessionOn = null
-            onOpenSession(SessionKey(s.id, session.id))
-        })
-    }
-}
-
-/** A server's connection and what the sidebar shows of it, as state. */
-private class SectionState(
-    val connection: ServerConnection,
-    val server: SavedServer,
-    val state: ConnectionState,
-    val indexSynced: Boolean,
-    val sessions: Map<String, Session>,
-    val projects: Map<String, Project>,
-    val harnesses: List<HarnessInfo>?,
-) {
-    val id get() = server.id
-    val name get() = server.name
-}
-
-@Composable
-private fun sectionState(connection: ServerConnection): SectionState {
-    val server by connection.server.collectAsStateWithLifecycle()
-    val state by connection.state.collectAsStateWithLifecycle()
-    val indexSynced by connection.indexSynced.collectAsStateWithLifecycle()
-    val sessions by connection.sessions.collectAsStateWithLifecycle()
-    val projects by connection.projects.collectAsStateWithLifecycle()
-    val harnesses by connection.harnesses.collectAsStateWithLifecycle()
-    return SectionState(connection, server, state, indexSynced, sessions, projects, harnesses)
 }
 
 /**
- * One server in the sidebar: its header, how its connection is doing, and
- * its sessions, those waiting for the user first. [selection]: the open
- * session's id, when it is on this server.
+ * The sidebar's top bar: a new session, and in a menu, pairing and Settings.
+ * In three columns the session list has the new session button instead.
  */
-private fun LazyListScope.serverSection(
-    s: SectionState,
-    first: Boolean,
-    expanded: Boolean,
-    showArchived: Boolean,
-    selection: String?,
-    onExpand: (Boolean) -> Unit,
-    onShowArchived: (Boolean) -> Unit,
-    onOpen: (String) -> Unit,
-    onNewSession: () -> Unit,
-    onArchive: (Session) -> Unit,
-    onRemove: () -> Unit,
-) {
-    item(key = "${s.id}/header") {
-        ServerHeader(
-            s, expanded, Modifier.animateItem().padding(top = if (first) 0.dp else 8.dp),
-            onActivate = {
-                // Once the connection has given up, a tap tries again.
-                if (s.state is ConnectionState.Failed) {
-                    s.connection.retry()
-                    onExpand(true)
-                } else {
-                    onExpand(!expanded)
-                }
-            },
-            onNewSession = onNewSession,
-            onRemove = onRemove,
-        )
-    }
-    if (!expanded) return
-
-    status(s, onNewSession)
-    fun rows(list: List<Session>) = items(list, key = { "${s.id}/${it.id}" }) { session ->
-        SessionRowItem(
-            session, s.projects[session.projectId], s.harnesses?.firstOrNull { it.id == session.harness },
-            background = palette.mantle,
-            selected = session.id == selection,
-            onClick = { onOpen(session.id) },
-            onArchive = { onArchive(session) },
-            modifier = Modifier.animateItem(),
-        )
-    }
-    val active = s.sessions.activeSessions
-    rows(active.filter { it.status == SessionStatus.AWAITING_APPROVAL } + active.filter { it.status != SessionStatus.AWAITING_APPROVAL })
-
-    val archived = s.sessions.archivedSessions
-    if (archived.isEmpty()) return
-    item(key = "${s.id}/archived") {
-        val angle by animateFloatAsState(if (showArchived) 90f else 0f, label = "chevron")
-        SidebarRow(
-            Modifier.animateItem().clickable { onShowArchived(!showArchived) }
-                .semantics { stateDescription = if (showArchived) "Shown" else "Hidden" },
-        ) {
-            Icon(painterResource(Icons.archive), null, Modifier.size(18.dp), tint = palette.overlay)
-            Text("Archived", style = Type.body, color = palette.subtext)
-            Text("${archived.size}", style = Type.body, color = palette.overlay)
-            Spacer(Modifier.weight(1f))
-            Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
-        }
-    }
-    if (showArchived) rows(archived)
-}
-
-/** While it isn't connected, why; and once it has given up, a way to try again. */
-private fun LazyListScope.status(s: SectionState, onNewSession: () -> Unit) {
-    val key = "${s.id}/status"
-    when {
-        s.state is ConnectionState.Failed -> item(key = key) {
-            SidebarRow(Modifier.animateItem().clickable { s.connection.retry() }, Alignment.Top) {
-                Icon(painterResource(Icons.offline), null, Modifier.size(18.dp), tint = palette.red)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        s.state.message, style = Type.body, color = palette.subtext, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("connection-error"),
-                    )
-                    Text("Try again", style = Type.body, color = palette.accent)
-                }
-            }
-        }
-        s.state == ConnectionState.Connecting -> item(key = key) {
-            SidebarRow(Modifier.animateItem()) {
-                Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(14.dp), color = palette.subtext, strokeWidth = 2.dp)
-                }
-                Text(if (s.indexSynced) "Reconnecting…" else "Connecting…", style = Type.body, color = palette.subtext)
-            }
-        }
-        s.state == ConnectionState.Connected && s.indexSynced && s.sessions.isEmpty() -> item(key = key) {
-            SidebarRow(Modifier.animateItem().clickable(onClick = onNewSession)) {
-                Icon(painterResource(Icons.newSession), null, Modifier.size(18.dp), tint = palette.overlay)
-                Text("Start a session", style = Type.body, color = palette.subtext)
-            }
-        }
-    }
-}
-
-/** A row of the sidebar that isn't a session, its icon in line with the sessions' status icons. */
 @Composable
-private fun SidebarRow(
-    modifier: Modifier = Modifier,
-    alignment: Alignment.Vertical = Alignment.CenterVertically,
-    content: @Composable RowScope.() -> Unit,
-) {
-    Row(
-        modifier.fillMaxWidth().background(palette.mantle).padding(Metrics.rowInsets),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = alignment,
+fun RowScope.SidebarToolbar(servers: List<ServerState>, onAdd: () -> Unit, onSettings: () -> Unit, newSession: Boolean = true) {
+    var menu by remember { mutableStateOf(false) }
+    if (newSession) NewSessionButton(servers)
+    // In a menu, as on iPad: a + here would read as a new session, as each server's does.
+    Box {
+        IconButton({ menu = true }) { Icon(painterResource(Icons.more), "More") }
+        DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
+            MenuItem("Pair a server", Icons.add) { menu = false; onAdd() }
+            MenuItem("Settings", Icons.settings) { menu = false; onSettings() }
+        }
+    }
+}
+
+/** Starts a session on the server connected; with more than one, a menu offers each. */
+@Composable
+fun NewSessionButton(servers: List<ServerState>) {
+    val actions = LocalSessionActions.current
+    val connected = servers.filter { it.state == ConnectionState.Connected }
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        IconButton(
+            { if (connected.size == 1) actions.newSession(connected[0].connection) else menu = true },
+            enabled = connected.isNotEmpty(),
+            modifier = Modifier.testTag("new-session"),
+        ) {
+            Icon(painterResource(Icons.newSession), "New session")
+        }
+        DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
+            for (s in connected) MenuItem("On ${s.name}", Icons.server) { menu = false; actions.newSession(s.connection) }
+        }
+    }
+}
+
+/** A sidebar list that pulls to refresh every server's connection. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SidebarRefresh(servers: List<ServerState>, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            scope.launch {
+                refreshing = true
+                refreshConnections(servers)
+                refreshing = false
+            }
+        },
+        modifier = modifier.fillMaxSize(),
         content = content,
     )
 }
 
 /**
- * A server's section header: its name and connection, and while its sessions
- * are hidden, how many there are and whether one is waiting for the user. A
- * tap shows or hides them, or tries again once the connection has given up.
- * A + starts a session on the server; its other actions are in a ⋯ menu,
- * which a long press on the name opens too.
+ * While a server isn't connected, why; once it has given up, a way to try
+ * again; and once it has no sessions, a way to start one.
+ */
+fun LazyListScope.connectionStatus(s: ServerState) {
+    val key = "${s.id}/status"
+    val state = s.state
+    when {
+        state is ConnectionState.Failed -> item(key = key) {
+            SidebarRow(Modifier.animateItem().clickable { s.connection.retry() }, Alignment.Top) {
+                Icon(painterResource(Icons.offline), null, Modifier.size(16.dp), tint = palette.red)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        state.message, style = Type.subheadline, color = palette.subtext, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("connection-error"),
+                    )
+                    Text("Try again", style = Type.subheadline, color = palette.accent)
+                }
+            }
+        }
+        state == ConnectionState.Connecting -> item(key = key) {
+            SidebarRow(Modifier.animateItem()) {
+                Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(12.dp), color = palette.subtext, strokeWidth = 1.5.dp)
+                }
+                Text(if (s.indexSynced) "Reconnecting…" else "Connecting…", style = Type.subheadline, color = palette.subtext)
+            }
+        }
+        state == ConnectionState.Connected && s.indexSynced && s.sessions.isEmpty() -> item(key = key) {
+            val actions = LocalSessionActions.current
+            SidebarRow(Modifier.animateItem().clickable { actions.newSession(s.connection) }) {
+                Icon(painterResource(Icons.newSession), null, Modifier.size(16.dp), tint = palette.overlay)
+                Text("Start a session", style = Type.subheadline, color = palette.subtext)
+            }
+        }
+    }
+}
+
+/** A row of the sidebar that isn't a session, its icon in line with the sessions' status glyphs. */
+@Composable
+fun SidebarRow(
+    modifier: Modifier = Modifier,
+    alignment: Alignment.Vertical = Alignment.CenterVertically,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier.fillMaxWidth().background(palette.mantle).padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = alignment,
+        content = content,
+    )
+}
+
+/** Shows or hides the archived sessions below it. */
+@Composable
+fun ArchivedToggle(count: Int, shown: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val angle by animateFloatAsState(if (shown) 90f else 0f, label = "chevron")
+    SidebarRow(modifier.clickable { onToggle(!shown) }.semantics { stateDescription = if (shown) "Shown" else "Hidden" }) {
+        Icon(painterResource(Icons.archive), null, Modifier.size(16.dp), tint = palette.overlay)
+        Text("Archived", style = Type.body, color = palette.overlay, modifier = Modifier.weight(1f))
+        Text("$count", style = Type.body.copy(fontFeatureSettings = "tnum"), color = palette.overlay)
+        Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
+    }
+}
+
+/**
+ * A server as a section header: its name, how its connection is doing, and
+ * while its rows are hidden, how many sessions it has and whether one needs
+ * you. A tap shows or hides the rows, or tries again once the connection has
+ * given up. A + starts a session on it; its other actions are in a ⋯ menu,
+ * which a long press on the name opens too. [compact]: a narrow column,
+ * where the name gets the +'s room and the menu has the action.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ServerHeader(
-    s: SectionState,
-    expanded: Boolean,
-    modifier: Modifier,
-    onActivate: () -> Unit,
-    onNewSession: () -> Unit,
-    onRemove: () -> Unit,
-) {
+fun ServerHeader(s: ServerState, expanded: Boolean, onExpand: (Boolean) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val actions = LocalSessionActions.current
     val name = s.name
-    val active = s.sessions.activeSessions
-    val waiting = active.any { it.status == SessionStatus.AWAITING_APPROVAL }
-    val offline = s.state is ConnectionState.Failed
+    val active = s.active
+    val waiting = active.any { it.needsYou }
     val connected = s.state == ConnectionState.Connected
     var menu by remember { mutableStateOf(false) }
     val description = buildList {
@@ -367,13 +231,21 @@ private fun ServerHeader(
                 .combinedClickable(
                     role = Role.Button,
                     onClickLabel = when {
-                        offline -> "Try to connect again"
+                        s.offline -> "Try to connect again"
                         expanded -> "Hide sessions"
                         else -> "Show sessions"
                     },
                     onLongClickLabel = "Actions",
                     onLongClick = { menu = true },
-                    onClick = onActivate,
+                    onClick = {
+                        // Once the connection has given up, a tap tries again.
+                        if (s.offline) {
+                            s.connection.retry()
+                            onExpand(true)
+                        } else {
+                            onExpand(!expanded)
+                        }
+                    },
                 )
                 .semantics {
                     contentDescription = name
@@ -387,31 +259,55 @@ private fun ServerHeader(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(painterResource(Icons.server), null, Modifier.size(18.dp), tint = palette.overlay)
-                Text(
-                    name, style = Type.body.copy(fontWeight = FontWeight.SemiBold), color = palette.text,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
-                )
-                ConnectionDot(s.state, size = 8.dp)
+                val style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold)
+                Text(name, style = style, color = palette.subtext, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                ConnectionDot(s.state, size = 7.dp)
                 if (!expanded && active.isNotEmpty()) {
-                    Text("${active.size}", style = Type.body.copy(fontWeight = FontWeight.SemiBold), color = palette.overlay)
+                    Text("${active.size}", style = style.copy(fontFeatureSettings = "tnum"), color = palette.overlay)
                 }
                 if (!expanded && waiting) {
-                    Icon(painterResource(Icons.approval), null, Modifier.size(14.dp), tint = palette.yellow)
+                    Icon(painterResource(Icons.approval), null, Modifier.size(13.dp), tint = palette.yellow)
                 }
             }
         }
-        if (connected) {
-            IconButton(onNewSession) { Icon(painterResource(Icons.add), "New session on $name", tint = palette.subtext) }
-        }
-        Box {
-            IconButton({ menu = true }) { Icon(painterResource(Icons.more), "$name actions", tint = palette.subtext) }
-            DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-                MenuItem("New session on $name", Icons.add, enabled = connected) { menu = false; onNewSession() }
-                MenuItem("Reconnect", Icons.reconnect) { menu = false; s.connection.retry() }
-                HorizontalDivider(color = palette.surface0)
-                MenuItem("Remove $name…", Icons.delete, color = palette.red) { menu = false; onRemove() }
+        if (connected && !compact) {
+            IconButton({ actions.newSession(s.connection) }) {
+                Icon(painterResource(Icons.add), "New session on $name", Modifier.size(20.dp), tint = palette.subtext)
             }
         }
+        Box {
+            IconButton({ menu = true }) { Icon(painterResource(Icons.more), "$name actions", Modifier.size(20.dp), tint = palette.subtext) }
+            DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) { ServerMenuItems(s) { menu = false } }
+        }
     }
+}
+
+/** A server's actions, for its menus: a new session, reconnecting, removing it. */
+@Composable
+fun ServerMenuItems(s: ServerState, dismiss: () -> Unit) {
+    val actions = LocalSessionActions.current
+    MenuItem("New session on ${s.name}", Icons.add, enabled = s.state == ConnectionState.Connected) { dismiss(); actions.newSession(s.connection) }
+    MenuItem("Reconnect", Icons.reconnect) { dismiss(); s.connection.retry() }
+    HorizontalDivider(color = palette.surface0)
+    MenuItem("Remove ${s.name}…", Icons.delete, color = palette.red) { dismiss(); actions.remove(s.server) }
+}
+
+/** The servers whose rows are hidden, which the Projects and Columns sidebars share. */
+class CollapsedServers(private val ids: Set<String>, private val settings: AppSettings, private val servers: List<String>) {
+    fun expanded(id: String) = id !in ids
+
+    fun setExpanded(id: String, shown: Boolean) {
+        settings.update(Keys.collapsedServers, "") { stored ->
+            // Forgets servers that were removed.
+            toggled(stored, id, present = !shown).split(' ').filter { it in servers }.joinToString(" ")
+        }
+    }
+}
+
+@Composable
+fun rememberCollapsedServers(servers: List<ServerState>): CollapsedServers {
+    val settings = LocalSettings.current
+    // By id, separated by spaces.
+    val stored by settings.state(Keys.collapsedServers, "")
+    return CollapsedServers(stored.split(' ').filter { it.isNotEmpty() }.toSet(), settings, servers.map { it.id })
 }

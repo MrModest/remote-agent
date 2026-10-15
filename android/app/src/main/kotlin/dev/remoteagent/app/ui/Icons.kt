@@ -43,6 +43,7 @@ object Icons {
     @DrawableRes val dictating = R.drawable.sym_graphic_eq // waveform
     @DrawableRes val toolThink = R.drawable.sym_group // person.2
     @DrawableRes val image = R.drawable.sym_image // photo
+    @DrawableRes val allSessions = R.drawable.sym_inbox // tray.full
     @DrawableRes val keyDown = R.drawable.sym_keyboard_arrow_down
     @DrawableRes val keyLeft = R.drawable.sym_keyboard_arrow_left
     @DrawableRes val keyRight = R.drawable.sym_keyboard_arrow_right
@@ -56,6 +57,7 @@ object Icons {
     @DrawableRes val approval = R.drawable.sym_pan_tool_fill // hand.raised.fill
     @DrawableRes val inProgress = R.drawable.sym_pending // circle.dotted
     @DrawableRes val photos = R.drawable.sym_photo_library // photo.on.rectangle
+    @DrawableRes val running = R.drawable.sym_play_circle // play.circle
     @DrawableRes val reasoning = R.drawable.sym_psychology // brain
     @DrawableRes val scanQR = R.drawable.sym_qr_code_scanner // qrcode.viewfinder
     @DrawableRes val radioOn = R.drawable.sym_radio_button_checked // largecircle.fill.circle

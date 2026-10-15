@@ -37,8 +37,9 @@ import dev.remoteagent.core.store.SavedServer
 import dev.remoteagent.core.store.ServerConnection
 import kotlinx.coroutines.launch
 
-// A session's row and the dialogs that go with it, for the phone's list of a
-// server's sessions and the tablet's sidebar. Mirrors apple/Shared/Views/SessionRow.swift.
+// A session's row, for the phone's list of a server's sessions, and the
+// dialogs that go with it, which the tablet's sidebars (SidebarRows.kt) use
+// too. Mirrors apple/Shared/Views/SessionRow.swift.
 
 @Composable
 fun SessionRow(session: Session, project: Project?, harness: HarnessInfo?, modifier: Modifier = Modifier) {

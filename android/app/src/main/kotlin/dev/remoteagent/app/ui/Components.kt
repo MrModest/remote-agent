@@ -21,11 +21,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.remoteagent.core.protocol.Session
 import dev.remoteagent.core.protocol.SessionStatus
 import dev.remoteagent.core.protocol.SlashCommand
 import dev.remoteagent.core.store.ConnectionState
@@ -50,6 +52,41 @@ fun StatusIcon(status: SessionStatus, size: Dp = 18.dp, background: Boolean = fa
                 Icon(painterResource(Icons.background), "Running in the background", tint = palette.subtext)
             } else {
                 Icon(painterResource(Icons.circle), "Idle", tint = palette.overlay)
+            }
+        }
+    }
+}
+
+/**
+ * A session's state as a small glyph, for the tablet sidebars' compact rows:
+ * a spinner while it works, a hand while it waits for an answer, a triangle
+ * once it failed, a stop, a clock while tasks run in the background, else a
+ * ring. Mirrors StatusGlyph in apple/Shared/Views/Components.swift.
+ */
+@Composable
+fun StatusGlyph(session: Session, modifier: Modifier = Modifier) {
+    val background = session.status == SessionStatus.IDLE && session.backgroundTasks.isNotEmpty()
+    val label = when (session.status) {
+        SessionStatus.RUNNING -> "Working"
+        SessionStatus.AWAITING_APPROVAL -> "Needs you"
+        SessionStatus.ERROR -> "Failed"
+        SessionStatus.STOPPED -> "Stopped"
+        else -> if (background) "Running in the background" else "Idle"
+    }
+    Box(modifier.size(16.dp).clearAndSetSemantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+        when (session.status) {
+            SessionStatus.RUNNING -> CircularProgressIndicator(Modifier.size(11.dp), color = palette.subtext, strokeWidth = 1.5.dp)
+            SessionStatus.AWAITING_APPROVAL -> Icon(painterResource(Icons.approval), null, Modifier.size(13.dp), tint = palette.yellow)
+            SessionStatus.ERROR -> Icon(painterResource(Icons.warning), null, Modifier.size(13.dp), tint = palette.red)
+            SessionStatus.STOPPED -> Icon(painterResource(Icons.stop), null, Modifier.size(11.dp), tint = palette.overlay)
+            else -> if (background) {
+                Icon(painterResource(Icons.background), null, Modifier.size(13.dp), tint = palette.subtext)
+            } else {
+                val ring = palette.overlay
+                Canvas(Modifier.size(7.dp)) {
+                    val stroke = 1.2.dp.toPx()
+                    drawCircle(ring, radius = (size.minDimension - stroke) / 2, style = Stroke(stroke))
+                }
             }
         }
     }

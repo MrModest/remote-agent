@@ -28,7 +28,7 @@ SYMBOLS = {
     "search": False, "settings": False, "share": False, "stop": True, "stop_circle": False, "terminal": False,
     "theater_comedy": False, "undo": False, "unfold_more": False, "arrow_selector_tool": False,
     "warning": True, "wifi_off": False, "wrap_text": False, "dangerous": False, "link": False,
-    "keyboard_hide": False, "functions": False,
+    "keyboard_hide": False, "functions": False, "play_circle": False, "inbox": False,
 }
 
 URL = "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/{name}/{style}/24px.svg"

@@ -121,7 +121,7 @@ tap 'desc=Hide Terminal'; sleep 0.5
 step "tablet"
 # Wide, every server's sessions are in a sidebar beside the open session.
 WIDE=1; "$A" shell wm size 2560x1600; "$A" shell wm density 320
-wait_for 'id=server-header' 10 || fail "no sidebar on a tablet"
+wait_for 'id=sidebar' 10 || fail "no sidebar on a tablet"
 [ "$(texts 'text=write smoke.txt' | grep -c .)" -ge 2 ] || fail "the session isn't open beside the sidebar"
 shot 07-tablet
 # Narrow again, back from the session goes to its server's sessions (below).

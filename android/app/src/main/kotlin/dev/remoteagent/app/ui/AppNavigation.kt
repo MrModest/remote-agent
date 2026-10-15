@@ -75,14 +75,23 @@ fun App(app: RemoteAgentApp, pendingLink: MutableStateFlow<PairingLink?>) {
 @Composable
 private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
     val store = LocalStore.current
+    val settings = LocalSettings.current
     val backStack = rememberNavBackStack(ServersKey)
     val link by pendingLink.collectAsStateWithLifecycle()
     var showAdd by rememberSaveable { mutableStateOf(false) }
 
+    val layoutName by settings.state(AppSettings.Keys.sidebarLayout, SidebarLayout.INBOX.stored)
+    val layout = SidebarLayout.parse(layoutName)
     // Wide is where the list-detail strategy puts the list beside the session,
     // decided from the same directive: there the root is the sidebar of every
-    // server's sessions, as on iPad. Narrow, it is a phone's stack.
-    val directive = calculatePaneScaffoldDirective(currentWindowAdaptiveInfoV2())
+    // server's sessions, as on iPad. Narrow, it is a phone's stack. The Columns
+    // layout's wider list pane goes through the directive, not the list
+    // entry's metadata: a scene keeps the pane width it was first given, which
+    // would be the Inbox's until the setting has loaded.
+    val window = currentWindowAdaptiveInfoV2()
+    val directive = calculatePaneScaffoldDirective(window).let { d ->
+        listPaneWidth(layout, window.windowSizeClass)?.let { d.copy(defaultPanePreferredWidth = it) } ?: d
+    }
     val wide = directive.maxHorizontalPartitions > 1
     val listDetail = rememberListDetailSceneStrategy<NavKey>(directive = directive)
     LaunchedEffect(wide) {
@@ -114,7 +123,8 @@ private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
                 metadata = if (wide) ListDetailSceneStrategy.listPane(detailPlaceholder = { NoSessionSelected(onAdd = { showAdd = true }) }) else emptyMap(),
             ) {
                 if (wide) {
-                    SessionsSidebar(
+                    ServerSplitView(
+                        layout,
                         selection = backStack.lastOrNull() as? SessionKey,
                         onOpenSession = { backStack.openSession(it) },
                         onAdd = { showAdd = true },

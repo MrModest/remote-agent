@@ -39,8 +39,12 @@ fun SettingsView(onBack: () -> Unit) {
     val interfaceStep by settings.state(Keys.interfaceTextSize, TextSize.DEFAULT_INTERFACE)
     val messages by settings.state(Keys.messageTextSize, TextSize.DEFAULT_MESSAGES)
     val placement by settings.state(Keys.terminalPlacement, TerminalPlacement.OVER.name)
+    val layoutName by settings.state(Keys.sidebarLayout, SidebarLayout.INBOX.stored)
+    val sidebarLayout = SidebarLayout.parse(layoutName)
     val systemScale = LocalConfiguration.current.fontScale
-    // A phone shows the terminal in place of the messages; there's no room beside them.
+    // The sidebar's layout and where the terminal opens: for a wide window. A
+    // phone shows a server's sessions in a list of their own, and the terminal
+    // in place of the messages, as there's no room beside them.
     val wide = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
 
     fun setAppearance(a: Appearance) {
@@ -49,7 +53,7 @@ fun SettingsView(onBack: () -> Unit) {
     }
 
     val isDefault = appearance == Appearance.SYSTEM.name && follows && messages == TextSize.DEFAULT_MESSAGES &&
-        placement == TerminalPlacement.OVER.name
+        placement == TerminalPlacement.OVER.name && sidebarLayout == SidebarLayout.INBOX
 
     Screen(title = { Text("Settings", style = Type.headline) }, onBack = onBack, background = palette.mantle) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).formWidth()) {
@@ -89,6 +93,11 @@ fun SettingsView(onBack: () -> Unit) {
                 SettingsPreview(Modifier.padding(12.dp))
             }
             if (wide) {
+                FormSection("Sidebar", footer = AnnotatedString(sidebarLayout.summary)) {
+                    PickerRow("Layout", sidebarLayout.title, SidebarLayout.entries.map { it.stored to it.title }, tag = "sidebar-layout") {
+                        settings.put(Keys.sidebarLayout, it)
+                    }
+                }
                 FormSection("Terminal", footer = AnnotatedString("Where a session's terminal opens. In a narrow window it takes the place of the messages.")) {
                     TerminalPlacement.entries.forEachIndexed { i, p ->
                         if (i > 0) FormDivider()
@@ -107,6 +116,7 @@ fun SettingsView(onBack: () -> Unit) {
                         settings.put(Keys.interfaceTextSize, TextSize.DEFAULT_INTERFACE)
                         settings.put(Keys.messageTextSize, TextSize.DEFAULT_MESSAGES)
                         settings.put(Keys.terminalPlacement, TerminalPlacement.OVER.name)
+                        settings.put(Keys.sidebarLayout, SidebarLayout.INBOX.stored)
                     }.padding(12.dp),
                 )
             }

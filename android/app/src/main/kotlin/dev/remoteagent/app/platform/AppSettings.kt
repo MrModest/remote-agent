@@ -15,6 +15,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.remoteagent.app.ui.Appearance
+import dev.remoteagent.app.ui.SidebarLayout
 import dev.remoteagent.app.ui.TextSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -25,7 +26,7 @@ import kotlinx.coroutines.launch
 /**
  * The settings views keep, like @AppStorage: the appearance, text sizes,
  * where the terminal opens, the choices a new session starts from, and the
- * servers the sidebar hides.
+ * tablet's sidebar: its layout and what it hides.
  */
 class AppSettings(private val context: Context, private val scope: CoroutineScope) {
     private val store = PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("settings") }
@@ -36,6 +37,11 @@ class AppSettings(private val context: Context, private val scope: CoroutineScop
 
     fun <T> put(key: Preferences.Key<T>, value: T?) {
         scope.launch { store.edit { if (value == null) it.remove(key) else it[key] = value } }
+    }
+
+    /** Changes a value from what is stored, not from what a view last read, which may not have loaded yet. */
+    fun <T> update(key: Preferences.Key<T>, default: T, transform: (T) -> T) {
+        scope.launch { store.edit { it[key] = transform(it[key] ?: default) } }
     }
 
     /** Light or dark for the whole app, system UI included, like overrideUserInterfaceStyle. */
@@ -65,6 +71,12 @@ class AppSettings(private val context: Context, private val scope: CoroutineScop
         val dictationLanguage = stringPreferencesKey("dictationLanguage")
         /** The servers whose sessions the tablet's sidebar hides, by id, separated by spaces. */
         val collapsedServers = stringPreferencesKey("collapsedServers")
+        /** The projects the Projects layout folds shut, as "<server id>/<project id>", separated by spaces. */
+        val collapsedProjects = stringPreferencesKey("collapsedProjects")
+        /** The tablet's sidebar: `SidebarLayout.stored`. */
+        val sidebarLayout = stringPreferencesKey(SidebarLayout.KEY)
+        /** The Columns layout's collection: `SessionCollection.stored`. */
+        val sessionCollection = stringPreferencesKey("sessionCollection")
     }
 }
 

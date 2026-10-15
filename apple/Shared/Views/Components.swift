@@ -138,3 +138,45 @@ struct ConnectionDot: View {
         }
     }
 }
+
+/// A session's state in the sidebar's denser rows: a ring while idle, a
+/// spinner while it works, and the symbols that ask for the user. It sits on
+/// the middle of the first line of text beside it.
+struct StatusGlyph: View {
+    let session: Session
+
+    var body: some View {
+        Group {
+            switch session.status {
+            case .running:
+                ProgressView().controlSize(.mini)
+            case .awaitingApproval:
+                Image(systemName: "hand.raised.fill").foregroundStyle(Palette.yellow)
+            case .error:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.red)
+            case .stopped:
+                Image(systemName: "stop.fill").imageScale(.small).foregroundStyle(Palette.overlay)
+            case .idle where session.backgroundTasks?.isEmpty == false:
+                Image(systemName: "clock").foregroundStyle(Palette.subtext)
+            case .idle, .unknown:
+                Circle().strokeBorder(Palette.overlay, lineWidth: 1.2).frame(width: 7, height: 7)
+            }
+        }
+        .scaledFont(.caption)
+        .frame(width: 16, height: 16)
+        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        switch session.status {
+        case .running: "Working"
+        case .awaitingApproval: "Needs you"
+        case .error: "Failed"
+        case .stopped: "Stopped"
+        case .idle where session.backgroundTasks?.isEmpty == false: "Running in the background"
+        case .idle, .unknown: "Idle"
+        }
+    }
+}

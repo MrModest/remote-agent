@@ -19,6 +19,9 @@ struct SessionView: View {
     @State private var attachments = Attachments()
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @FocusState private var composerFocused: Bool
+    #if os(macOS)
+    @Environment(\.inlineSessionTitle) private var inlineTitle
+    #endif
 
     private var session: Session? { store.session ?? connection.sessions[store.sessionID] }
     private var harness: HarnessInfo? { session.flatMap { connection.harness($0.harness) } }
@@ -44,6 +47,11 @@ struct SessionView: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .background { terminalShortcuts }
+        #if os(macOS)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if inlineTitle, let s = session { titleHeader(s) }
+        }
+        #endif
         .navigationTitle(session?.title ?? "Session")
         #if os(macOS)
         .navigationSubtitle(session.map(macSubtitle) ?? "")
@@ -532,6 +540,27 @@ struct SessionView: View {
     }
 
     #if os(macOS)
+    /// The title and subtitle over the transcript, where the toolbar's title
+    /// is the session list's: in three columns, as in Mail.
+    private func titleHeader(_ s: Session) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(s.title)
+                .scaledFont(.headline)
+                .foregroundStyle(Palette.text)
+            Text(macSubtitle(s))
+                .scaledFont(.caption)
+                .foregroundStyle(Palette.subtext)
+        }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Metrics.margin)
+        .padding(.vertical, 8)
+        .background(Palette.base)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.surface0).frame(height: 1)
+        }
+    }
+
     /// The subtitle under the window title: where the agent works, then the
     /// agent, with the context use at the end.
     private func macSubtitle(_ s: Session) -> String {

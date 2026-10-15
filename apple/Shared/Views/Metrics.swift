@@ -43,8 +43,12 @@ enum Metrics {
         static let field: CGFloat = 10
         /// The composer on the Mac, a card around the field and its buttons.
         static let composer: CGFloat = 14
-        /// The selected row in the iPad sidebar.
+        /// The selected row in the sidebar and session list.
+        #if os(macOS)
+        static let selection: CGFloat = 8
+        #else
         static let selection: CGFloat = 12
+        #endif
     }
 }
 

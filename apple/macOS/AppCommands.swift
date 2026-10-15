@@ -5,6 +5,7 @@ import SwiftUI
 struct AppCommands: Commands {
     @FocusedValue(\.newSession) private var newSession
     @FocusedValue(\.pairServer) private var pairServer
+    @AppStorage(SidebarLayout.key) private var layout = SidebarLayout.inbox
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -16,5 +17,14 @@ struct AppCommands: Commands {
                 .disabled(pairServer == nil)
         }
         SidebarCommands()
+        // The sidebar's layouts, as Finder's View menu has "as Icons" and "as List".
+        CommandGroup(after: .sidebar) {
+            Divider()
+            ForEach(Array(SidebarLayout.allCases.enumerated()), id: \.element) { i, l in
+                Toggle("as \(l.title)", isOn: Binding { layout == l } set: { if $0 { layout = l } })
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+            }
+            Divider()
+        }
     }
 }

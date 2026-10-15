@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage(TextSize.messagesKey) private var messages = TextSize.defaultMessages
     @AppStorage(Appearance.key) private var appearance = Appearance.system
     @AppStorage(TerminalPlacement.key) private var terminalPlacement = TerminalPlacement.over
+    @AppStorage(SidebarLayout.key) private var sidebarLayout = SidebarLayout.inbox
     #if os(macOS)
     @AppStorage(FontChoice.messageKey) private var messageFont = ""
     @AppStorage(FontChoice.codeKey) private var codeFont = ""
@@ -65,7 +66,19 @@ struct SettingsView: View {
                     Text("Preview").formHeaderFont()
                 }
 
-                if offersTerminalPlacement {
+                if offersSplitView {
+                    Section {
+                        Picker("Layout", selection: $sidebarLayout) {
+                            ForEach(SidebarLayout.allCases) { Text($0.title).tag($0) }
+                        }
+                    } header: {
+                        Text("Sidebar").formHeaderFont()
+                    } footer: {
+                        Text(sidebarFooter).formFooterFont()
+                    }
+                }
+
+                if offersSplitView {
                     Section {
                         Picker("Opens", selection: $terminalPlacement) {
                             ForEach(TerminalPlacement.allCases) { Text($0.title).tag($0) }
@@ -100,12 +113,22 @@ struct SettingsView: View {
         #endif
     }
 
-    /// An iPhone shows the terminal in place of the messages; there's no room beside them.
-    private var offersTerminalPlacement: Bool {
+    /// The sidebar's layout and where the terminal opens: for iPad and the
+    /// Mac. An iPhone shows a server's sessions in a list of their own, and the
+    /// terminal in place of the messages, as there's no room beside them.
+    private var offersSplitView: Bool {
         #if os(iOS)
         UIDevice.current.userInterfaceIdiom == .pad
         #else
         true
+        #endif
+    }
+
+    private var sidebarFooter: String {
+        #if os(macOS)
+        "\(sidebarLayout.summary) The View menu switches them too, with ⌘1, ⌘2 and ⌘3."
+        #else
+        sidebarLayout.summary
         #endif
     }
 
@@ -172,19 +195,21 @@ struct SettingsView: View {
 
     private var isDefault: Bool {
         appearance == .system && followsSystem && messages == TextSize.defaultMessages && terminalPlacement == .over
+            && sidebarLayout == .inbox
     }
     #else
     private var interfaceFooter: String { "Lists and labels." }
 
     private var isDefault: Bool {
         appearance == .system && interface == TextSize.defaultInterface && messages == TextSize.defaultMessages
-            && messageFont.isEmpty && codeFont.isEmpty && terminalPlacement == .over
+            && messageFont.isEmpty && codeFont.isEmpty && terminalPlacement == .over && sidebarLayout == .inbox
     }
     #endif
 
     private func restoreDefaults() {
         appearance = .system
         terminalPlacement = .over
+        sidebarLayout = .inbox
         interface = TextSize.defaultInterface
         messages = TextSize.defaultMessages
         #if os(iOS)

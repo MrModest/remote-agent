@@ -182,9 +182,10 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 1. Generate the project and build the app (commands here run from the repo root):
 
    ```bash
-   (cd apple && xcodegen) && xcodebuild -project apple/RemoteAgent.xcodeproj -scheme RemoteAgent-macOS -configuration Release -derivedDataPath apple/build build
-   cp -R "apple/build/Build/Products/Release/Remote Agent.app" /Applications/
+   apple/scripts/install-macos-release.sh
    ```
+
+   The script builds the Release app, sets its version from the latest `v*` tag, and copies it to `/Applications`.
 
    Or open `apple/RemoteAgent.xcodeproj`, pick the **RemoteAgent-macOS** scheme and press ⌘R.
 

@@ -229,7 +229,11 @@ func (r *runtime) Respond(ctx context.Context, approvalID string, resp harness.R
 			input, _ = json.Marshal(m)
 		}
 		body = map[string]any{"behavior": "allow", "updatedInput": input}
-		if resp.OptionID == "allow_session" && len(p.suggestions) > 0 && string(p.suggestions) != "null" {
+		if p.special == model.SpecialPlan {
+			// Building leaves plan mode for auto mode, in the same answer, so
+			// no tool call runs in between in another mode.
+			body["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": "auto", "destination": "session"}}
+		} else if resp.OptionID == "allow_session" && len(p.suggestions) > 0 && string(p.suggestions) != "null" {
 			body["updatedPermissions"] = p.suggestions
 		}
 	}
@@ -239,11 +243,7 @@ func (r *runtime) Respond(ctx context.Context, approvalID string, resp harness.R
 	// Approving a plan leaves plan mode; session-wide grants may switch modes.
 	if body["behavior"] == "allow" {
 		if p.special == model.SpecialPlan {
-			if resp.OptionID == "allow_session" {
-				r.setMode("acceptEdits")
-			} else {
-				r.setMode("default")
-			}
+			r.setMode("auto")
 		} else if resp.OptionID == "allow_session" {
 			if m := suggestedMode(p.suggestions); m != "" {
 				r.setMode(m)
@@ -844,9 +844,8 @@ func (r *runtime) onControlRequest(f frame) {
 		json.Unmarshal(req.Input, &in)
 		ap.Special, ap.PlanText, ap.Title = model.SpecialPlan, in.Plan, "Ready to code?"
 		ap.Options = []model.ApprovalOption{
-			{ID: "allow_session", Label: "Yes, auto-accept edits", Kind: model.OptionAllowSession},
-			{ID: "allow", Label: "Yes, ask before edits", Kind: model.OptionAllowOnce},
-			{ID: "deny", Label: "Keep planning", Kind: model.OptionDeny},
+			{ID: "allow", Label: "Build with auto mode", Kind: model.OptionAllowOnce},
+			{ID: "deny", Label: "Continue planning", Kind: model.OptionDeny},
 		}
 	default:
 		ap.ToolItemID = req.ToolUseID

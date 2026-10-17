@@ -210,6 +210,58 @@ func TestDescribeToolSymlinkedCwd(t *testing.T) {
 	}
 }
 
+func TestReplayPlanBuildsInAutoMode(t *testing.T) {
+	diag := filepath.Join(t.TempDir(), "diag.ndjson")
+	rt, _ := openReplay(t, "testdata/plan.ndjson", "claude-rec/ws",
+		harness.OpenOptions{SessionID: "01a14b23-33f5-75cc-abc5-09c64e16449a", Mode: "plan", DiagPath: diag})
+	turn := replaytest.RunTurn(t, rt, "Plan how to create a file hello.txt containing the word hi, then build it.",
+		func(harness.ApprovalEvent) string { return "allow" })
+
+	if len(turn.Approvals) != 1 {
+		t.Fatalf("approvals = %d, want only the plan's", len(turn.Approvals))
+	}
+	ap := turn.Approvals[0].Approval
+	if ap.Special != model.SpecialPlan || !strings.HasPrefix(ap.PlanText, "Write `hi` into `hello.txt`") {
+		t.Errorf("approval = %+v", ap)
+	}
+	var opts []string
+	for _, o := range ap.Options {
+		opts = append(opts, o.ID+"="+o.Label)
+	}
+	if want := []string{"allow=Build with auto mode", "deny=Continue planning"}; !slices.Equal(opts, want) {
+		t.Errorf("options = %v, want %v", opts, want)
+	}
+
+	// The approval itself switches Claude to auto mode, so the build that
+	// follows asks nothing.
+	_, sent := replaytest.Diag(t, diag)
+	var perms any
+	for _, f := range sent {
+		if r, _ := f["response"].(map[string]any); r != nil && r["request_id"] == turn.Approvals[0].ID {
+			perms = r["response"].(map[string]any)["updatedPermissions"]
+		}
+	}
+	if want := []any{map[string]any{"type": "setMode", "mode": "auto", "destination": "session"}}; !reflect.DeepEqual(perms, want) {
+		t.Errorf("updatedPermissions = %v, want %v", perms, want)
+	}
+	var modes []string
+	for _, ev := range turn.Events {
+		if mc, ok := ev.(harness.ModeChanged); ok {
+			modes = append(modes, mc.Mode)
+		}
+	}
+	if !slices.Equal(modes, []string{"auto"}) {
+		t.Errorf("mode changes = %v, want auto", modes)
+	}
+	if tools := turn.ItemsOf(model.ItemToolCall); len(tools) == 0 || tools[len(tools)-1].Tool.Output != "hi" {
+		t.Errorf("tool calls = %+v, want the build to end with cat", tools)
+	}
+	if turn.End.Status != model.TurnCompleted {
+		t.Errorf("end = %+v", turn.End)
+	}
+	replaytest.CloseClean(t, rt)
+}
+
 func TestReplayCompact(t *testing.T) {
 	rt, _ := openReplay(t, "testdata/compact.ndjson", "claude-rec/ws",
 		harness.OpenOptions{SessionID: "01a1268a-c7f9-77b8-ad00-c550f1168608", Mode: "default"})

@@ -49,7 +49,10 @@ var modes = []model.Choice{
 func (h *Harness) baseArgs() []string {
 	return append(append([]string{}, h.cmd.Args...),
 		"--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
-		"--include-partial-messages", "--permission-prompt-tool", "stdio")
+		"--include-partial-messages", "--permission-prompt-tool", "stdio",
+		// Lets a session switch to bypassPermissions later (Yolo on a plan,
+		// or the mode picker); without it Claude falls back to default.
+		"--allow-dangerously-skip-permissions")
 }
 
 func (h *Harness) spec(cwd string, extra ...string) proc.Spec {

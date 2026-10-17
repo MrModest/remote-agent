@@ -230,27 +230,34 @@ func (r *runtime) Respond(ctx context.Context, approvalID string, resp harness.R
 		}
 		body = map[string]any{"behavior": "allow", "updatedInput": input}
 		if p.special == model.SpecialPlan {
-			// Building leaves plan mode for auto mode, in the same answer, so
-			// no tool call runs in between in another mode.
-			body["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": "auto", "destination": "session"}}
+			// Building leaves plan mode in the same answer, so no tool call
+			// runs in between in another mode.
+			body["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": buildMode(resp.OptionID), "destination": "session"}}
 		} else if resp.OptionID == "allow_session" && len(p.suggestions) > 0 && string(p.suggestions) != "null" {
 			body["updatedPermissions"] = p.suggestions
 		}
 	}
-	if err := r.conn.respond(approvalID, body); err != nil {
-		return err
-	}
 	// Approving a plan leaves plan mode; session-wide grants may switch modes.
+	// This goes first: Claude reports the mode it takes in a status frame,
+	// which corrects it if Claude refused the mode.
 	if body["behavior"] == "allow" {
 		if p.special == model.SpecialPlan {
-			r.setMode("auto")
+			r.setMode(buildMode(resp.OptionID))
 		} else if resp.OptionID == "allow_session" {
 			if m := suggestedMode(p.suggestions); m != "" {
 				r.setMode(m)
 			}
 		}
 	}
-	return nil
+	return r.conn.respond(approvalID, body)
+}
+
+// buildMode is the mode an approved plan is built in.
+func buildMode(optionID string) string {
+	if optionID == "yolo" {
+		return "bypassPermissions"
+	}
+	return "auto"
 }
 
 type suggestion struct {
@@ -315,6 +322,10 @@ func (r *runtime) onFrame(f frame, raw []byte) {
 				r.setMode(f.PermissionMode)
 			}
 			r.onInit()
+		case "status":
+			if f.PermissionMode != "" {
+				r.setMode(f.PermissionMode)
+			}
 		case "compact_boundary":
 			r.onCompacted(f)
 		case "background_tasks_changed":
@@ -845,6 +856,7 @@ func (r *runtime) onControlRequest(f frame) {
 		ap.Special, ap.PlanText, ap.Title = model.SpecialPlan, in.Plan, "Ready to code?"
 		ap.Options = []model.ApprovalOption{
 			{ID: "allow", Label: "Build with auto mode", Kind: model.OptionAllowOnce},
+			{ID: "yolo", Label: "Yolo", Kind: model.OptionAllowSession},
 			{ID: "deny", Label: "Continue planning", Kind: model.OptionDeny},
 		}
 	default:

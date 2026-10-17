@@ -210,56 +210,82 @@ func TestDescribeToolSymlinkedCwd(t *testing.T) {
 	}
 }
 
-func TestReplayPlanBuildsInAutoMode(t *testing.T) {
-	diag := filepath.Join(t.TempDir(), "diag.ndjson")
-	rt, _ := openReplay(t, "testdata/plan.ndjson", "claude-rec/ws",
-		harness.OpenOptions{SessionID: "01a14b23-33f5-75cc-abc5-09c64e16449a", Mode: "plan", DiagPath: diag})
-	turn := replaytest.RunTurn(t, rt, "Plan how to create a file hello.txt containing the word hi, then build it.",
-		func(harness.ApprovalEvent) string { return "allow" })
+func TestReplayPlanApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name, transcript, sessionID, option string
+		wantMode                            string   // the mode the approval asks Claude for
+		wantModes                           []string // the mode changes rad reports
+		wantApprovals                       int
+	}{
+		{"auto", "testdata/plan.ndjson", "01a14b23-33f5-75cc-abc5-09c64e16449a", "allow",
+			"auto", []string{"auto"}, 1},
+		{"yolo", "testdata/plan-yolo.ndjson", "01a14b2f-4c65-7301-bb7d-7743ee0dde58", "yolo",
+			"bypassPermissions", []string{"bypassPermissions"}, 1},
+		// Recorded without --allow-dangerously-skip-permissions: Claude
+		// refuses bypass mode, says so in a status frame, and asks again.
+		{"refused", "testdata/mode-refused.ndjson", "01a14b2d-1c3a-7294-9dbf-d8e63a661ff1", "yolo",
+			"bypassPermissions", []string{"bypassPermissions", "default"}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diag := filepath.Join(t.TempDir(), "diag.ndjson")
+			rt, _ := openReplay(t, tc.transcript, "claude-rec/ws",
+				harness.OpenOptions{SessionID: tc.sessionID, Mode: "plan", DiagPath: diag})
+			turn := replaytest.RunTurn(t, rt, "Plan how to create a file hello.txt containing the word hi, then build it.",
+				func(ev harness.ApprovalEvent) string {
+					if ev.Approval.Special == model.SpecialPlan {
+						return tc.option
+					}
+					return "allow"
+				})
 
-	if len(turn.Approvals) != 1 {
-		t.Fatalf("approvals = %d, want only the plan's", len(turn.Approvals))
-	}
-	ap := turn.Approvals[0].Approval
-	if ap.Special != model.SpecialPlan || !strings.HasPrefix(ap.PlanText, "Write `hi` into `hello.txt`") {
-		t.Errorf("approval = %+v", ap)
-	}
-	var opts []string
-	for _, o := range ap.Options {
-		opts = append(opts, o.ID+"="+o.Label)
-	}
-	if want := []string{"allow=Build with auto mode", "deny=Continue planning"}; !slices.Equal(opts, want) {
-		t.Errorf("options = %v, want %v", opts, want)
-	}
+			if len(turn.Approvals) != tc.wantApprovals {
+				t.Fatalf("approvals = %d, want %d", len(turn.Approvals), tc.wantApprovals)
+			}
+			ap := turn.Approvals[0].Approval
+			if ap.Special != model.SpecialPlan || !strings.Contains(ap.PlanText, "hello.txt") {
+				t.Errorf("approval = %+v", ap)
+			}
+			var opts []string
+			for _, o := range ap.Options {
+				opts = append(opts, o.ID+"="+o.Label)
+			}
+			if want := []string{"allow=Build with auto mode", "yolo=Yolo", "deny=Continue planning"}; !slices.Equal(opts, want) {
+				t.Errorf("options = %v, want %v", opts, want)
+			}
 
-	// The approval itself switches Claude to auto mode, so the build that
-	// follows asks nothing.
-	_, sent := replaytest.Diag(t, diag)
-	var perms any
-	for _, f := range sent {
-		if r, _ := f["response"].(map[string]any); r != nil && r["request_id"] == turn.Approvals[0].ID {
-			perms = r["response"].(map[string]any)["updatedPermissions"]
-		}
+			// The approval itself switches Claude's mode, so the build that
+			// follows runs in it.
+			command, sent := replaytest.Diag(t, diag)
+			if !strings.Contains(command, `"--allow-dangerously-skip-permissions"`) {
+				t.Errorf("command = %s, want bypass mode allowed", command)
+			}
+			var perms any
+			for _, f := range sent {
+				if r, _ := f["response"].(map[string]any); r != nil && r["request_id"] == turn.Approvals[0].ID {
+					perms = r["response"].(map[string]any)["updatedPermissions"]
+				}
+			}
+			if want := []any{map[string]any{"type": "setMode", "mode": tc.wantMode, "destination": "session"}}; !reflect.DeepEqual(perms, want) {
+				t.Errorf("updatedPermissions = %v, want %v", perms, want)
+			}
+			var modes []string
+			for _, ev := range turn.Events {
+				if mc, ok := ev.(harness.ModeChanged); ok {
+					modes = append(modes, mc.Mode)
+				}
+			}
+			if !slices.Equal(modes, tc.wantModes) {
+				t.Errorf("mode changes = %v, want %v", modes, tc.wantModes)
+			}
+			if tools := turn.ItemsOf(model.ItemToolCall); len(tools) == 0 || tools[len(tools)-1].Tool.Output != "hi" {
+				t.Errorf("tool calls = %+v, want the build to end with cat", tools)
+			}
+			if turn.End.Status != model.TurnCompleted {
+				t.Errorf("end = %+v", turn.End)
+			}
+			replaytest.CloseClean(t, rt)
+		})
 	}
-	if want := []any{map[string]any{"type": "setMode", "mode": "auto", "destination": "session"}}; !reflect.DeepEqual(perms, want) {
-		t.Errorf("updatedPermissions = %v, want %v", perms, want)
-	}
-	var modes []string
-	for _, ev := range turn.Events {
-		if mc, ok := ev.(harness.ModeChanged); ok {
-			modes = append(modes, mc.Mode)
-		}
-	}
-	if !slices.Equal(modes, []string{"auto"}) {
-		t.Errorf("mode changes = %v, want auto", modes)
-	}
-	if tools := turn.ItemsOf(model.ItemToolCall); len(tools) == 0 || tools[len(tools)-1].Tool.Output != "hi" {
-		t.Errorf("tool calls = %+v, want the build to end with cat", tools)
-	}
-	if turn.End.Status != model.TurnCompleted {
-		t.Errorf("end = %+v", turn.End)
-	}
-	replaytest.CloseClean(t, rt)
 }
 
 func TestReplayCompact(t *testing.T) {

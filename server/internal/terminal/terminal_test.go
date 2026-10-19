@@ -217,6 +217,65 @@ func TestReplayAfterWrap(t *testing.T) {
 	}
 }
 
+func TestReplayQuietsQueries(t *testing.T) {
+	m := newManager(t)
+	term := open(t, m, "s1")
+	live := term.Attach("", 0)
+	term.Write([]byte(`printf 'a\033[>qb\033[cc%s\n' $((6*7))` + "\n"))
+	if out := readUntil(t, live, "42"); !strings.Contains(out, "a\x1b[>qb\x1b[cc42") {
+		t.Errorf("live output %q lost its queries", out)
+	}
+
+	// A client shown the output afterwards gets the queries blanked, so its
+	// terminal doesn't answer them into the shell.
+	quieted := "a\x00\x00\x00\x00b\x00\x00\x00c42"
+	if out := readUntil(t, term.Attach("", 0), "42"); !strings.Contains(out, quieted) {
+		t.Errorf("replay %q, want the queries blanked: %q", out, quieted)
+	}
+	if out := readUntil(t, term.Attach(term.ID, 0), "42"); !strings.Contains(out, quieted) {
+		t.Errorf("resumed output %q, want the queries blanked: %q", out, quieted)
+	}
+}
+
+func TestQuiet(t *testing.T) {
+	q := func(s string) string { return strings.Repeat("_", len(s)) }
+	for _, tc := range []struct{ in, want string }{
+		{"\x1b[c\x1b[0c\x1b[>c\x1b[=c", "*"},             // device attributes
+		{"\x1b[6n\x1b[?996n\x1b[>q\x1b[>0q\x1b[?u", "*"}, // status, version, kitty keyboard
+		{"\x1b[?2026$p\x1b[4$p", "*"},                    // DECRQM
+		{"\x1b[16t\x1b[14;2t\x1b[21t", "*"},              // window reports
+		{"\x1b]11;?\x07\x1b]4;1;?\x1b\\\x1b]52;c;?\x07", "*"},
+		{"\x1bP$qm\x1b\\\x1bP+q544e\x1b\\", "*"},                             // DECRQSS, XTGETTCAP
+		{"\x1b_Gi=31,a=q;AAAA\x1b\\x", q("\x1b_Gi=31,a=q;AAAA\x1b\\") + "x"}, // kitty graphics
+		{"\x1bZ", "*"},
+		{"ab\x1b[cd", "ab" + q("\x1b[c") + "d"},
+		// An escape sequence ends a string early.
+		{"\x1b]2;x\x1b[c\x07", "\x1b]2;x" + q("\x1b[c") + "\x07"},
+		// Sequences that do something keep it.
+		{"\x1b[2J\x1b[u\x1b[>1u\x1b[1 q\x1b[8;24;80t\x1b[22t\x1b[!p\x1b[>4;1m", ""},
+		{"\x1b]0;title?\x07\x1b]11;#000000\x07\x1b]8;;http://x?\x1b\\", ""},
+		{"\x1bP1;1;1q#0~\x1b\\\x1b_Xyz\x1b\\\x1b7\x1b(B", ""}, // sixel, another APC, escapes
+		// A query cut short is still being written; CAN cancels one.
+		{"x\x1b[", ""},
+		{"\x1b[?2026", ""},
+		{"\x1bP$q", ""},
+		{"\x1b[\x18c", ""},
+	} {
+		want := tc.want
+		switch want {
+		case "":
+			want = tc.in
+		case "*":
+			want = q(tc.in)
+		}
+		p := []byte(tc.in)
+		quiet(p)
+		if got := strings.ReplaceAll(string(p), "\x00", "_"); got != want {
+			t.Errorf("quiet(%q) = %q, want %q", tc.in, got, want)
+		}
+	}
+}
+
 func TestShutdown(t *testing.T) {
 	m := newManager(t)
 	term := open(t, m, "s1")

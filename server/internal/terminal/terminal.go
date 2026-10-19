@@ -202,8 +202,8 @@ func (t *Terminal) Kill() {
 // Reader is one client's place in a shell's output.
 type Reader struct {
 	t       *Terminal
-	off     uint64
-	pending []byte
+	off     uint64 // the client's next byte in the ring, after pending
+	pending []byte // what the client gets first: output from before it attached, quieted
 
 	// Offset is where the client's stream starts, and Reset says it starts
 	// afresh rather than resuming, so the client clears its screen first.
@@ -218,7 +218,8 @@ func (t *Terminal) Attach(id string, offset uint64) *Reader {
 	defer t.mu.Unlock()
 	r := &Reader{t: t}
 	if id == t.ID && offset >= t.ring.start() && offset <= t.ring.end() {
-		r.off, r.Offset = offset, offset
+		r.Offset = offset
+		r.catchUp(offset, nil)
 		return r
 	}
 	r.reset()
@@ -229,8 +230,27 @@ func (t *Terminal) Attach(id string, offset uint64) *Reader {
 // as part of the stream, so Offset is that much before the output's offset.
 func (r *Reader) reset() {
 	off, prefix := r.t.ring.fresh()
-	r.off, r.pending, r.Reset = off, prefix, true
+	r.Reset = true
 	r.Offset = off - uint64(len(prefix))
+	r.catchUp(off, prefix)
+}
+
+// catchUp queues the output from off that the shell has already written,
+// after head, with its queries quieted. Output written from now on reaches
+// the client as it is, queries and all, for it to answer.
+func (r *Reader) catchUp(off uint64, head []byte) {
+	end := r.t.ring.end()
+	data := r.t.ring.slice(off, end)
+	quiet(data)
+	r.off, r.pending = end, append(head, data...)
+}
+
+// take hands over up to max bytes of what's pending.
+func (r *Reader) take(max int) []byte {
+	n := min(len(r.pending), max)
+	p := r.pending[:n:n]
+	r.pending = r.pending[n:]
+	return p
 }
 
 // Chunk is what a Reader hands its client next.
@@ -248,18 +268,14 @@ func (r *Reader) Next(ctx context.Context, max int) (Chunk, error) {
 	t := r.t
 	for {
 		t.mu.Lock()
-		if p := r.pending; p != nil {
-			r.pending = nil
+		if len(r.pending) > 0 {
+			p := r.take(max)
 			t.mu.Unlock()
-			if len(p) > 0 {
-				return Chunk{Data: p}, nil
-			}
-			continue
+			return Chunk{Data: p}, nil
 		}
 		if r.off < t.ring.start() {
 			r.reset()
-			p := r.pending
-			r.pending = nil
+			p := r.take(max)
 			t.mu.Unlock()
 			return Chunk{Reset: true, Offset: r.Offset, Data: p}, nil
 		}

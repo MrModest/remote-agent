@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 17 gates connections to LAN servers behind a runtime permission. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- Dictation in the composer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 

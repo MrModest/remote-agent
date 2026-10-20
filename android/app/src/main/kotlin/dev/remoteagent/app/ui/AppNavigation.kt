@@ -1,6 +1,11 @@
 package dev.remoteagent.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +61,21 @@ data object SettingsKey : NavKey
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun App(app: RemoteAgentApp, pendingLink: MutableStateFlow<PairingLink?>) {
+    val context = LocalContext.current
+    var networkReady by rememberSaveable {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < 37 ||
+                context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    var networkDenied by rememberSaveable { mutableStateOf(false) }
+    val networkPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        networkDenied = !granted
+        networkReady = true
+    }
+    LaunchedEffect(Unit) {
+        if (!networkReady) networkPermission.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+    }
     CompositionLocalProvider(LocalStore provides app.store, LocalSettings provides app.settings) {
         val settings = app.settings
         val follows by settings.state(AppSettings.Keys.interfaceFollowsSystem, true)
@@ -64,7 +85,13 @@ fun App(app: RemoteAgentApp, pendingLink: MutableStateFlow<PairingLink?>) {
             RemoteAgentTheme {
                 // Test tags become resource ids, so `uiautomator dump` (android/e2e) can find views.
                 Box(Modifier.fillMaxSize().background(palette.base).semantics { testTagsAsResourceId = true }) {
-                    AppNavigation(pendingLink)
+                    // Wait for the permission result before pairing or starting saved connections.
+                    if (networkReady) AppNavigation(pendingLink)
+                    ErrorDialog(
+                        if (networkDenied) "To connect to servers over Wi-Fi, allow Nearby devices in Settings > Apps > Remote Agent > Permissions. You can continue using Tailscale." else null,
+                        title = "Local network access denied",
+                        onDismiss = { networkDenied = false },
+                    )
                 }
             }
         }

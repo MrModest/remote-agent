@@ -25,6 +25,9 @@ import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.compose.elements.MarkdownParagraph
+import com.mikepenz.markdown.compose.elements.MarkdownTable
+import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
+import com.mikepenz.markdown.compose.elements.MarkdownTableRow
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
@@ -86,6 +89,18 @@ fun AgentMarkdown(text: String, modifier: Modifier = Modifier, images: List<Imag
             }
         },
         components = markdownComponents(
+            // The defaults ellipsize every cell after one line, even when the table scrolls.
+            table = { model ->
+                MarkdownTable(
+                    model.content, model.node, model.typography.table,
+                    headerBlock = { content, node, width, style ->
+                        MarkdownTableHeader(content, node, width, style, maxLines = Int.MAX_VALUE)
+                    },
+                    rowBlock = { content, node, width, style ->
+                        MarkdownTableRow(content, node, width, style, maxLines = Int.MAX_VALUE)
+                    },
+                )
+            },
             codeFence = { CodeFence { style -> MarkdownCodeFence(it.content, it.node, style) { c, _, s -> CodeSnippet(c, s) } } },
             codeBlock = { CodeFence { style -> MarkdownCodeBlock(it.content, it.node, style) { c, _, s -> CodeSnippet(c, s) } } },
             paragraph = { model ->

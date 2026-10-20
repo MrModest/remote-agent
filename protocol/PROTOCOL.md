@@ -222,6 +222,7 @@ Approval {
 | `project.remove` | `{id}` | `{}` (`conflict` if it has unarchived sessions) |
 | `session.list` | — | `{sessions}` |
 | `session.create` | `{commandId, projectId, harness, model?, effort?, mode?, workspace: {kind, branch?, baseRef?}, prompt?, images?, title?}` | `Session` |
+| `session.commands` | `{sessionId}` | `{commands: [{name, description?, kind?, scope?}]}` |
 | `session.prompt` | `{commandId, sessionId, text, images?}` | `Item` (the user message; `queued` if a turn is running) |
 | `session.interrupt` | `{sessionId, force?}` | `{}` (`force` kills the agent process) |
 | `session.sendNow` | `{sessionId, itemId}` | `{}` (see below) |
@@ -251,6 +252,7 @@ FileStat { path, oldPath?, status: "added"|"modified"|"deleted"|"renamed", addit
 ```
 
 - **Slash commands.** A prompt of `/<name>`, optionally followed by text for the command, runs the command; send it with `session.prompt` like any other. Its turn has the prompt as its user message and, for `/compact`, a `notice` item once the agent has summarized the conversation; the session's `context` then drops. The harness's `commands` are the ones the apps offer in a menu; others typed in a prompt go to the agent as they are.
+- **Composer suggestions.** `session.commands` discovers commands and user-invocable skills in the session's effective workspace, without sending a prompt or starting a turn. It may start or resume the agent process. `name` has no leading slash; `kind` is `skill`, `prompt`, or `extension` when known, and `scope` is the agent-reported source scope (such as `user` or `project`). Metadata may be absent. Archived sessions return an empty array. Clients fetch when entering a leading `/` token, filter names and descriptions locally, and insert `/<name> ` for editing. Suggestions stop once arguments begin. Discovery failures (including an older server's `method_not_found`) leave ordinary prompts and the built-in command menu usable. Clients may append the harness's known commands, deduplicating by name. Codex resolves a matching leading `/skill-name` or `$skill-name` to its native `$skill-name` plus an exact skill input; Claude uses `/name` and Pi `/skill:name`. Paths stay on the server. Discovery is refreshed when the picker reopens; Claude's catalog comes from its process initialization and refreshes when that runtime restarts.
 - **Queued prompts.** A prompt sent while a turn runs waits as a `queued` user message, and the next turn starts with it once the turn ends. Interrupting the turn cancels every queued prompt. `session.sendNow` sends one of them at once instead: rad interrupts the turn and starts the next turn with that prompt, ahead of the others, which stay queued behind it. A prompt no longer queued (it started, or was cancelled) is left as it is.
 - **Images in prompts.** `images` lists ids from `POST /v1/images`. A prompt needs text, images or both. An unknown id is `invalid`.
 - **Approval answers.** For a `question` approval, put `answers` (question text → chosen label; join multiple labels with `", "`) in the request, along with the option of kind `allow_once`.

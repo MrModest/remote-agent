@@ -1,4 +1,4 @@
-import type { Diff, Event, FileStat, ImageRef, Item, Session, Turn } from "../protocol/models";
+import type { SlashCommand, Diff, Event, FileStat, ImageRef, Item, Session, Turn } from "../protocol/models";
 import { RPCError } from "../protocol/rpc";
 import type { Drafts } from "./drafts";
 import { Observable } from "./observable";
@@ -228,6 +228,12 @@ export class SessionStore extends Observable {
       this.changed();
       throw e;
     }
+  }
+
+  async commands(): Promise<SlashCommand[]> {
+    if (!this.host) throw RPCError.disconnected();
+    const result = await this.host.call<{ commands: SlashCommand[] }>("session.commands", { sessionId: this.sessionID });
+    return result.commands;
   }
 
   async interrupt(force = false) {

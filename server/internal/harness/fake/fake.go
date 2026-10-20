@@ -86,7 +86,17 @@ type runtime struct {
 	tasks     []model.BackgroundTask
 }
 
-func (r *runtime) NativeID() string             { return r.id }
+func (r *runtime) NativeID() string { return r.id }
+func (r *runtime) Commands(context.Context) ([]model.Command, error) {
+	commands := []model.Command{harness.Compact, {Name: "skill:prototype", Description: "Prototype to answer a design question", Kind: "skill", Scope: "user"},
+		{Name: "skill:ask-guide", Description: "Ask which workflow fits the task", Kind: "skill", Scope: "user"}}
+	// Enough matches to exercise scrolling and filtering in the composer.
+	for i := 1; i <= 12; i++ {
+		commands = append(commands, model.Command{Name: fmt.Sprintf("skill:example-%02d", i), Description: "Ask for an example to explore a design question", Kind: "skill", Scope: "project"})
+	}
+	return commands, nil
+}
+
 func (r *runtime) Events() <-chan harness.Event { return r.events }
 
 func (r *runtime) emit(e harness.Event) {

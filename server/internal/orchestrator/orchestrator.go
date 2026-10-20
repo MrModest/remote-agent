@@ -275,6 +275,35 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string, image
 	return a.prompt(ctx, text, refs, files, commandID)
 }
 
+// Commands opens the session's agent only when the composer asks for suggestions.
+func (o *Orchestrator) Commands(ctx context.Context, sessionID string) ([]model.Command, error) {
+	a, err := o.actor(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sess.Archived {
+		return []model.Command{}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if a.rt == nil {
+		if err := a.open(ctx); err != nil {
+			return nil, err
+		}
+	}
+	a.lastActive = time.Now()
+	commands := []model.Command{}
+	if lister, ok := a.rt.(harness.CommandLister); ok {
+		commands, err = lister.Commands(ctx)
+	}
+	if commands == nil {
+		commands = []model.Command{}
+	}
+	return commands, err
+}
+
 func (o *Orchestrator) Interrupt(ctx context.Context, sessionID string, force bool) error {
 	a, err := o.actor(ctx, sessionID)
 	if err != nil {

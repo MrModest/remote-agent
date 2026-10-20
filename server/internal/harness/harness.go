@@ -175,6 +175,11 @@ type Runtime interface {
 	Close() error
 }
 
+// CommandLister discovers commands in the running session, without a model turn.
+type CommandLister interface {
+	Commands(context.Context) ([]model.Command, error)
+}
+
 type Harness interface {
 	ID() string
 	Probe(ctx context.Context) model.HarnessInfo

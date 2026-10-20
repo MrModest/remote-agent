@@ -41,6 +41,24 @@ trap restore EXIT
 step "install and pair"
 (cd android && ./gradlew -q :app:installDebug)
 "$A" shell am force-stop "$PKG"
+if [ "$("$A" shell getprop ro.build.version.sdk | tr -d '\r')" -ge 37 ]; then
+  step "local network permission: deny, then grant"
+  permission=android.permission.ACCESS_LOCAL_NETWORK
+  "$A" shell pm revoke "$PKG" "$permission"
+  "$A" shell pm clear-permission-flags "$PKG" "$permission" user-set user-fixed
+  "$A" shell am start -W -n "$PKG/dev.remoteagent.app.MainActivity" > /dev/null
+  wait_for 'id=permission_deny_button' 10 || fail "no local network permission prompt"
+  tap 'id=permission_deny_button'
+  wait_for 'text=Local network access denied' 10 || fail "no permission denial guidance"
+  tap 'text=OK'
+  wait_for 'text=Servers' 8 || wait_for 'id=new-session' 8 || fail "denial blocked the app"
+  "$A" shell am force-stop "$PKG"
+  "$A" shell am start -W -n "$PKG/dev.remoteagent.app.MainActivity" > /dev/null
+  wait_for 'id=permission_allow_button' 10 || fail "no permission retry"
+  tap 'id=permission_allow_button'
+  wait_for 'text=Servers' 8 || wait_for 'id=new-session' 8 || fail "grant didn't open the app"
+  "$A" shell am force-stop "$PKG"
+fi
 "$A" shell am start -W -n "$PKG/dev.remoteagent.app.MainActivity" > /dev/null
 wait_for 'text=Servers' 8 || wait_for 'id=new-session' 8 || fail "app didn't start"
 devices_before=$(radctl devices | grep -c . || true)

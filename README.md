@@ -210,6 +210,8 @@ You need a phone or tablet on Android 16 or later.
 
 Pair it: run `server/bin/rad pair` on the computer (add `--lan` for Wi-Fi), then tap **Pair a server** (or **+**) › **Scan QR code**. Google Play services shows the scanner, so the app needs no camera permission. Without Play services, paste the link instead. A `remoteagent://pair` link opened on the phone also opens the pairing sheet.
 
+On Android 17 or later, allow **Nearby devices** when the app first opens so it can reach servers over Wi-Fi. If you denied it, enable it in Settings › Apps › Remote Agent › Permissions, then return to the app. Tailscale connections can still work without this permission.
+
 - **Addresses:** the app talks plain `http://` to rad at any address `rad pair` prints, not only IPs, `.local` names and `*.ts.net` as on iOS. Prefer Tailscale: on the LAN the traffic isn't encrypted.
 - **Composer:** a hardware keyboard's Return sends and ⇧Return starts a new line. The terminal has a row of keys a phone keyboard lacks: esc, ctrl, tab and the arrows.
 - **Dictation** uses the phone's speech recognizer, on the device where it can, in your keyboard languages.

@@ -20,14 +20,33 @@ type skill struct {
 	} `json:"interface"`
 }
 
-func (r *runtime) skills(ctx context.Context) ([]skill, error) {
+func (r *runtime) skills(ctx context.Context, refresh bool) ([]skill, error) {
+	r.mu.Lock()
+	if !refresh && r.skillsKnown {
+		catalog := r.skillCatalog
+		r.mu.Unlock()
+		return catalog, nil
+	}
+	r.mu.Unlock()
+	catalog, err := r.loadSkills(ctx, refresh)
+	r.mu.Lock()
+	// Even a failed lookup must not be repeated on every Send; reopening the picker retries it.
+	r.skillsKnown = true
+	if err == nil {
+		r.skillCatalog = catalog
+	}
+	r.mu.Unlock()
+	return catalog, err
+}
+
+func (r *runtime) loadSkills(ctx context.Context, refresh bool) ([]skill, error) {
 	var res struct {
 		Data []struct {
 			Cwd    string  `json:"cwd"`
 			Skills []skill `json:"skills"`
 		} `json:"data"`
 	}
-	if err := r.conn.Call(ctx, "skills/list", map[string]any{"cwds": []string{r.cwd}, "forceReload": true}, &res); err != nil {
+	if err := r.conn.Call(ctx, "skills/list", map[string]any{"cwds": []string{r.cwd}, "forceReload": refresh}, &res); err != nil {
 		return nil, err
 	}
 	var out []skill
@@ -48,7 +67,7 @@ func (r *runtime) skills(ctx context.Context) ([]skill, error) {
 }
 
 func (r *runtime) Commands(ctx context.Context) ([]model.Command, error) {
-	skills, err := r.skills(ctx)
+	skills, err := r.skills(ctx, true)
 	if err != nil {
 		return nil, err
 	}

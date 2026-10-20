@@ -176,6 +176,7 @@ type Runtime interface {
 }
 
 // CommandLister discovers commands in the running session, without a model turn.
+// It may run concurrently with Prompt, Interrupt and Close.
 type CommandLister interface {
 	Commands(context.Context) ([]model.Command, error)
 }

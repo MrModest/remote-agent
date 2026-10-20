@@ -36,6 +36,15 @@ func TestReplaySkills(t *testing.T) {
 	}
 	replaytest.AwaitTurn(t, rt, nil)
 	_, sent := replaytest.Diag(t, diag)
+	lookups := 0
+	for _, frame := range sent {
+		if frame["method"] == "skills/list" {
+			lookups++
+		}
+	}
+	if lookups != 1 {
+		t.Errorf("skill discovery calls = %d, want one picker lookup and none on Send", lookups)
+	}
 	for _, frame := range sent {
 		if frame["method"] != "turn/start" {
 			continue
@@ -73,5 +82,65 @@ func TestSkillInput(t *testing.T) {
 		if text != input || selected != nil {
 			t.Errorf("changed unrelated input %q", input)
 		}
+	}
+}
+
+func TestReplaySkillCatalogLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name, transcript string
+		refreshes        int
+		lookupFails      bool
+		wantLookups      int
+		wantPath         string
+	}{
+		{name: "without picker", transcript: "skills.ndjson", wantLookups: 1, wantPath: "prototype/SKILL.md"},
+		{name: "explicit refresh", transcript: "skills-refresh.ndjson", refreshes: 2, wantLookups: 2, wantPath: "refreshed/SKILL.md"},
+		{name: "failed discovery", transcript: "skills-unavailable.ndjson", refreshes: 1, lookupFails: true, wantLookups: 1},
+		{name: "empty catalog", transcript: "skills-empty.ndjson", refreshes: 1, wantLookups: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cwd := filepath.Join(root, "codex-rec/ws")
+			if err := os.MkdirAll(cwd, 0755); err != nil {
+				t.Fatal(err)
+			}
+			exe, env := replaytest.Command(t, filepath.Join("testdata", tc.transcript), root)
+			diag := filepath.Join(t.TempDir(), "diag.ndjson")
+			rt, err := New(config.Command{Command: exe, Env: env}).Open(context.Background(), harness.OpenOptions{Cwd: cwd, DiagPath: diag})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tc.refreshes; i++ {
+				_, err := rt.(harness.CommandLister).Commands(context.Background())
+				if (err != nil) != tc.lookupFails {
+					t.Fatalf("discovery error=%v, want failure=%v", err, tc.lookupFails)
+				}
+			}
+			replaytest.RunTurn(t, rt, "/prototype arguments", nil)
+			_, sent := replaytest.Diag(t, diag)
+			lookups := 0
+			for _, f := range sent {
+				if f["method"] == "skills/list" {
+					lookups++
+					if f["params"].(map[string]any)["forceReload"] != (tc.refreshes > 0) {
+						t.Errorf("unexpected refresh mode: %+v", f)
+					}
+				}
+				if f["method"] == "turn/start" {
+					input := f["params"].(map[string]any)["input"].([]any)
+					if tc.wantPath != "" {
+						if len(input) != 2 || input[0].(map[string]any)["path"] != filepath.Join(root, tc.wantPath) || input[1].(map[string]any)["text"] != "$prototype arguments" {
+							t.Errorf("skill input=%+v", input)
+						}
+					} else if len(input) != 1 || input[0].(map[string]any)["text"] != "/prototype arguments" {
+						t.Errorf("ordinary fallback=%+v", input)
+					}
+				}
+			}
+			if lookups != tc.wantLookups {
+				t.Errorf("lookups=%d, want %d", lookups, tc.wantLookups)
+			}
+			replaytest.CloseClean(t, rt)
+		})
 	}
 }

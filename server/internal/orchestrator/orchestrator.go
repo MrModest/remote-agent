@@ -282,21 +282,30 @@ func (o *Orchestrator) Commands(ctx context.Context, sessionID string) ([]model.
 		return nil, err
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.sess.Archived {
+		a.mu.Unlock()
 		return []model.Command{}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if a.rt == nil {
 		if err := a.open(ctx); err != nil {
+			a.mu.Unlock()
 			return nil, err
 		}
 	}
 	a.lastActive = time.Now()
+	rt, gen := a.rt, a.rtGen
+	a.mu.Unlock()
 	commands := []model.Command{}
-	if lister, ok := a.rt.(harness.CommandLister); ok {
+	if lister, ok := rt.(harness.CommandLister); ok {
 		commands, err = lister.Commands(ctx)
+	}
+	a.mu.Lock()
+	obsolete := a.rt == nil || a.rtGen != gen || a.sess.Archived
+	a.mu.Unlock()
+	if obsolete {
+		return []model.Command{}, nil
 	}
 	if commands == nil {
 		commands = []model.Command{}

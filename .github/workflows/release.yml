@@ -314,7 +314,7 @@ jobs:
             - **Remote Agent for Android** (`Remote-Agent-Android.apk`): the client app for Android 16 or later. Open it on the phone and allow installing from your browser; later releases install over it.
             - **Web client**: the Docker image `ghcr.io/buldezir/remote-agent-web`, tagged `latest` and with the version, such as `0.2.0`. `web/compose.example.yaml` runs it.
 
-            Both Mac apps need macOS 27 on Apple silicon. They are signed with Developer ID and notarized by Apple, and update themselves: **Check for Updates…** is in the Remote Agent menu, and in the Server app's menu bar menu.
+            Both Mac apps need macOS 27 on Apple silicon. They are signed with Developer ID and notarized by Apple, and update themselves: **Check for Updates…** is in the Remote Agent menu, and in the Server app's menu bar menu. Drag each app into Applications on its own: macOS runs apps dragged in together from a temporary copy, which can't update itself. If an app says it can't be updated, quit it and run `xattr -dr com.apple.quarantine` on it in Applications.
         run: |
           sums=$(sha256sum *) && echo "$sums" > SHA256SUMS
           # The Mac apps' update feeds go up last, so that an app that reads

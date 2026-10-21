@@ -185,13 +185,24 @@ jobs:
             echo "$NOTARY_KEY_BASE64" | base64 -d > "$key"
             notary=(--key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
             ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
-            xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" "${notary[@]}" --wait --timeout 1h \
-              --output-format json | tee "$RUNNER_TEMP/notary.json"
-            echo
-            id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json")
-            status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json")
-            xcrun notarytool log "$id" "${notary[@]}"
-            if [ "$status" != Accepted ]; then echo "::error::Notarization: $status"; exit 1; fi
+            # Submitting and waiting are separate, and retried, so that the
+            # runner losing its connection for a moment doesn't fail the job.
+            id=
+            for attempt in 1 2 3; do
+              if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" "${notary[@]}" --output-format json > "$RUNNER_TEMP/notary.json" &&
+                id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json"); then break; fi
+              cat "$RUNNER_TEMP/notary.json"; sleep 30
+            done
+            if [ -z "$id" ]; then echo "::error::Couldn't submit for notarization"; exit 1; fi
+            echo "submission $id"
+            for attempt in 1 2 3 4 5; do
+              if xcrun notarytool wait "$id" "${notary[@]}" --timeout 1h --output-format json > "$RUNNER_TEMP/notary.json" &&
+                status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json"); then break; fi
+              cat "$RUNNER_TEMP/notary.json"; status=; sleep 30
+            done
+            cat "$RUNNER_TEMP/notary.json"; echo
+            xcrun notarytool log "$id" "${notary[@]}" || true
+            if [ "$status" != Accepted ]; then echo "::error::Notarization: ${status:-no answer}"; exit 1; fi
             xcrun stapler staple "$app"
             spctl --assess --type execute -vv "$app"
           fi

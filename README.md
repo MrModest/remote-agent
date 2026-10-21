@@ -111,8 +111,8 @@ rad update             # install it
 
    Run it from one place only: macOS treats each copy separately and can list both in System Settings.
 
-   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). That build is signed ad hoc and not notarized, so macOS blocks its first launch. Allow it under System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Remote Agent Server.app"`.
-2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, macOS forgets the app's permissions every time you rebuild it, or install a new release.
+   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). It is signed with Developer ID and notarized, and keeps its permissions when you install a newer release.
+2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, macOS forgets the app's permissions every time you rebuild it.
 3. Open it. It runs rad with your usual config and opens **Permissions** the first time:
    - **Desktop, Documents and Downloads:** macOS asks once for each folder. **Full Disk Access** covers them and everything else, and is switched on in System Settings.
    - **Accessibility, Screen Recording and Automation of System Events:** for agents that click, type, take screenshots or run AppleScript. Other apps ask the first time an agent scripts them.
@@ -189,8 +189,8 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 
    Or open `apple/RemoteAgent.xcodeproj`, pick the **RemoteAgent-macOS** scheme and press ⌘R.
 
-   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed ad hoc and not notarized, so allow its first launch under System Settings › Privacy & Security.
-2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build or release read the pairing tokens it saved in your keychain.
+   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed with Developer ID and notarized.
+2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build read the pairing tokens it saved in your keychain.
 3. Pair it: run `server/bin/rad pair`, then paste the link in **File › Pair a Server…**. When rad runs on the same Mac, `open "$(server/bin/rad pair --print-url)"` opens the link in the app.
 
 On the Mac, ⌘N starts a session on the server of the one you have open; the arrow beside the New Session button, or the + beside a server's name, starts one on another server. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The sidebar lists every paired server with its sessions, those waiting for you first. Click a server's name to hide or show its sessions; right-click it to reconnect or remove it. The app has one window, which opens again on the session you had open last. Dictation listens in your preferred languages from System Settings.
@@ -393,6 +393,17 @@ base64 -i ~/remote-agent-release.jks | gh secret set ANDROID_KEYSTORE_BASE64
 gh secret set ANDROID_KEYSTORE_PASSWORD
 gh secret set ANDROID_KEY_ALIAS      # remote-agent
 gh secret set ANDROID_KEY_PASSWORD
+```
+
+The Mac apps are signed with a Developer ID Application certificate and notarized, which takes a paid Apple Developer account. Create the certificate in Xcode › Settings › Accounts › Manage Certificates, export it from Keychain Access as a `.p12`, and make an App Store Connect API key (Users and Access › Integrations › Team Keys, with Developer access) for the notary service:
+
+```bash
+base64 -i DeveloperID.p12 | gh secret set MACOS_CERTIFICATE_P12_BASE64
+gh secret set MACOS_CERTIFICATE_PASSWORD
+gh secret set APPLE_TEAM_ID              # from developer.apple.com › Membership details
+base64 -i AuthKey_<KEYID>.p8 | gh secret set NOTARY_API_KEY_BASE64
+gh secret set NOTARY_API_KEY_ID
+gh secret set NOTARY_API_ISSUER_ID
 ```
 
 The raw protocol frames for each session are logged to `<data>/logs/<sessionId>.ndjson`.

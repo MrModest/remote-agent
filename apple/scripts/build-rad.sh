@@ -28,5 +28,11 @@ lipo -create $slices -output "$out"
 
 # rad sends Apple Events for agents (osascript), so it carries the app's
 # entitlements; codesign refuses to sign an app around unsigned code.
-codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" --options runtime --timestamp=none \
+# Notarization needs a secure timestamp on every binary, so a Developer ID
+# signature asks Apple for one; other builds skip it.
+timestamp=--timestamp=none
+case "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-${CODE_SIGN_IDENTITY:-}}" in
+"Developer ID"*) timestamp=--timestamp ;;
+esac
+codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" --options runtime "$timestamp" \
 	--identifier "$PRODUCT_BUNDLE_IDENTIFIER.rad" --entitlements "$SRCROOT/$CODE_SIGN_ENTITLEMENTS" "$out"

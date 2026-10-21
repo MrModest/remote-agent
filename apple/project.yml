@@ -24,7 +24,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     # Sparkle installs only updates signed with the private half, which is
     # the SPARKLE_PRIVATE_KEY secret (README.md › Development).
-    SPARKLE_PUBLIC_KEY: ""
+    SPARKLE_PUBLIC_KEY: WQontbp7coFEQwc0h6w4Or5DMoyvPz535n1amUTZNqc=
     # The Mac apps' hardened runtime, which notarization needs, is on when
     # they are signed with a team. Signed ad hoc, without one, it would stop
     # them from loading Sparkle.framework: library validation wants the app

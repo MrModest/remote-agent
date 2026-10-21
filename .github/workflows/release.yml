@@ -14,6 +14,9 @@ on:
       version:
         description: Version for the Mac apps, such as 0.10.0-test.1, to try their updates (a tag sets its own)
         required: false
+      bundle_id:
+        description: Bundle ID for the Mac apps, such as dev.remote-agent.updatetest, so that test builds keep apart from installed ones (the Server app adds .server)
+        required: false
 
 permissions:
   contents: read
@@ -143,6 +146,11 @@ jobs:
             m=("${BASH_REMATCH[@]}")
             version=(MARKETING_VERSION="$v" CURRENT_PROJECT_VERSION=$((m[1] * 1000000 + m[2] * 10000 + m[3] * 100 + ${m[5]:-99})))
           fi
+          if [ -n "$INPUT_BUNDLE_ID" ]; then
+            id=$INPUT_BUNDLE_ID
+            if [ "$SCHEME" = RemoteAgentServer ]; then id=$id.server; fi
+            version+=(PRODUCT_BUNDLE_IDENTIFIER="$id")
+          fi
           # Developer ID needs no provisioning profile for these entitlements.
           # Notarization wants a secure timestamp and no get-task-allow.
           if [ -n "$SIGNING_KEYCHAIN" ]; then
@@ -161,6 +169,7 @@ jobs:
           SCHEME: ${{ matrix.scheme }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUNDLE_ID: ${{ inputs.bundle_id }}
       - name: Package
         run: |
           app="apple/build/Build/Products/Release/$APP.app"

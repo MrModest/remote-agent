@@ -3,11 +3,18 @@ import SwiftUI
 /// The Mac menu bar. Like Mail, ⌘N makes the app's main thing, a session.
 /// The app has one window, so there is no New Window.
 struct AppCommands: Commands {
+    let updater: AppUpdater
     @FocusedValue(\.newSession) private var newSession
     @FocusedValue(\.pairServer) private var pairServer
     @AppStorage(SidebarLayout.key) private var layout = SidebarLayout.inbox
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            if updater.isRelease {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheck)
+            }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Session") { newSession?.wrappedValue = true }
                 .keyboardShortcut("n")

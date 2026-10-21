@@ -96,7 +96,7 @@ rad update             # install it
 - **As the background service:** if `install-service` set up this binary, the service is restarted and `rad update` waits for the new version to answer. A restart interrupts running turns, so while any session is busy (a turn running, or an approval waiting) it stops before downloading and names them. Pass `--now` to go ahead anyway.
 - **In a terminal:** restart `rad serve` yourself.
 - **Development builds:** a build from source (`rad version` says `dev`) isn't replaced without `--force`.
-- **Remote Agent Server app:** update its rad from the app's menu, below.
+- **Remote Agent Server app:** the app updates itself, and its rad, from its menu, below.
 
 ## Running rad as a Mac app
 
@@ -111,7 +111,7 @@ rad update             # install it
 
    Run it from one place only: macOS treats each copy separately and can list both in System Settings.
 
-   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). It is signed with Developer ID and notarized, and keeps its permissions when you install a newer release.
+   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). It is signed with Developer ID and notarized, updates itself, and keeps its permissions across updates.
 2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, macOS forgets the app's permissions every time you rebuild it.
 3. Open it. It runs rad with your usual config and opens **Permissions** the first time:
    - **Desktop, Documents and Downloads:** macOS asks once for each folder. **Full Disk Access** covers them and everything else, and is switched on in System Settings.
@@ -125,14 +125,13 @@ The menu shows whether rad is running, its addresses and the agents it found:
 - **Pair a Device…** shows the pairing QR code.
 - **Start at Login** replaces `rad install-service`. If that service is installed, the menu offers to remove it, since only one rad can serve a config at a time.
 - **Open Log** opens `~/Library/Logs/Remote Agent Server/rad.log`.
-- **Update rad to …** appears when a newer release is out; the app checks once a day, or when you choose **Check for Updates…**.
-  - The app downloads the new rad to `~/Library/Application Support/Remote Agent Server/` and restarts rad from there. It asks first if that would interrupt a session.
-  - The app itself doesn't change, so macOS keeps its permissions, and they cover the new rad too.
-  - When you later install a newer app, its own rad takes over and the download is deleted. A download that fails to start is deleted too, and the app goes back to its own rad.
-  - Builds from Xcode (version `0.1`) always run the rad built with them, and offer no updates.
+- **Check for Updates…**: the app updates itself, with the rad inside it, from this repository's releases. It checks once a day; a newer release shows in the menu as **Update to …**, which shows what's new and installs it.
+  - Installing restarts the app, and so rad. If that would interrupt a session, the app asks first. Choose **Later**, and the update installs when you quit the app, or when you choose **Install … and Restart…**.
+  - Each release is signed like the last, so macOS keeps the app's permissions.
+  - Builds from Xcode (version `0.1`) offer no updates.
 - Quitting the app stops rad and its agents.
 
-The `rad` CLI keeps working next to the app (`rad pair`, `rad devices`); the app's copy is `/Applications/Remote Agent Server.app/Contents/MacOS/rad`, or after an update the `rad-<version>` it downloaded.
+The `rad` CLI keeps working next to the app (`rad pair`, `rad devices`); the app's copy is `/Applications/Remote Agent Server.app/Contents/MacOS/rad`.
 
 ## Installing the app on an iPhone or iPad
 
@@ -189,7 +188,7 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 
    Or open `apple/RemoteAgent.xcodeproj`, pick the **RemoteAgent-macOS** scheme and press ⌘R.
 
-   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed with Developer ID and notarized.
+   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed with Developer ID and notarized, and updates itself: **Remote Agent › Check for Updates…**, and once a day unless you turn that off in Settings › Updates.
 2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build read the pairing tokens it saved in your keychain.
 3. Pair it: run `server/bin/rad pair`, then paste the link in **File › Pair a Server…**. When rad runs on the same Mac, `open "$(server/bin/rad pair --print-url)"` opens the link in the app.
 
@@ -405,5 +404,16 @@ base64 -i AuthKey_<KEYID>.p8 | gh secret set NOTARY_API_KEY_BASE64
 gh secret set NOTARY_API_KEY_ID
 gh secret set NOTARY_API_ISSUER_ID
 ```
+
+The Mac apps update themselves with [Sparkle](https://sparkle-project.org). Each release carries a feed for each app (`Remote-Agent-macOS-appcast.xml`, `Remote-Agent-Server-macOS-appcast.xml`) that says where its zip is, signed with an EdDSA key. The apps install only updates signed with that key, so make it once and keep a backup of the private half; its public half is `SPARKLE_PUBLIC_KEY` in `apple/project.yml`.
+
+```bash
+mkdir -p ~/sparkle && curl -fsSL https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz | tar -xf - -C ~/sparkle
+~/sparkle/bin/generate_keys --account remote-agent         # prints the public key
+~/sparkle/bin/generate_keys --account remote-agent -x ~/sparkle/private-key
+gh secret set SPARKLE_PRIVATE_KEY < ~/sparkle/private-key
+```
+
+To try the updates before a release, run the workflow by hand with a version, such as `0.10.0-test.1`: its Mac apps then offer and take updates, like a release's.
 
 The raw protocol frames for each session are logged to `<data>/logs/<sessionId>.ndjson`.

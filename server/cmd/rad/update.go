@@ -40,16 +40,13 @@ func updateRad(args []string) error {
 	now := fs.Bool("now", false, "restart the service even if sessions are running")
 	force := fs.Bool("force", false, "install the latest release over a development build, or again")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
-	to := fs.String("to", "", "install into `dir` as rad-<version> instead of over this rad, and restart nothing (for the Remote Agent Server app)")
+	busyOnly := fs.Bool("busy", false, "only list the sessions a restart would interrupt, without looking for a release (for the Remote Agent Server app)")
 	fs.Parse(args)
 	ctx := context.Background()
 	u := update.Default(api.Version)
 
-	if *to != "" {
-		if *check {
-			return errors.New("--check and --to don't go together")
-		}
-		return installInto(ctx, u, *to, *asJSON)
+	if *busyOnly {
+		return printBusy(busySessions(ctx), *asJSON)
 	}
 	rel, err := u.Latest(ctx)
 	if err != nil {
@@ -129,24 +126,20 @@ func printCheck(ctx context.Context, rel *update.Release, dev, newer, asJSON boo
 	return nil
 }
 
-// installInto puts the latest release into dir as rad-<version>, for the
-// Remote Agent Server app, which runs it in place of its own copy.
-func installInto(ctx context.Context, u *update.Client, dir string, asJSON bool) error {
-	rel, err := u.Latest(ctx)
-	if err != nil {
-		return fmt.Errorf("look up the latest release: %w", err)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	dst := filepath.Join(dir, "rad-"+rel.Version)
-	if err := u.Install(ctx, rel, dst); err != nil {
-		return err
-	}
+// printBusy prints what `rad update --busy` reports: the sessions a restart
+// would interrupt. The Remote Agent Server app asks before an update that
+// restarts it would.
+func printBusy(busy []string, asJSON bool) error {
 	if asJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"version": rel.Version, "path": dst})
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Busy []string `json:"busy"`
+		}{busy})
 	}
-	fmt.Printf("installed rad %s at %s\n", rel.Version, dst)
+	if len(busy) == 0 {
+		fmt.Println("no session is busy")
+		return nil
+	}
+	fmt.Println(sessionsRunning(busy))
 	return nil
 }
 

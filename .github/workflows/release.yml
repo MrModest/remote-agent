@@ -2,14 +2,18 @@
 # Agent and Remote Agent Server, for Apple silicon, signed with Developer ID
 # and notarized, and the Android app, signed with the key in the repository's
 # secrets. Checks that the web client builds; it isn't published yet. Pushing
-# a tag like v0.2.0 publishes them as that tag's release; running the workflow
-# by hand only keeps them as run artifacts.
+# a tag like v0.2.0 publishes them as that tag's release, with the Mac apps'
+# update feeds; running the workflow by hand only keeps them as run artifacts.
 name: Release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version for the Mac apps, such as 0.10.0-test.1, to try their updates (a tag sets its own)
+        required: false
 
 permissions:
   contents: read
@@ -80,9 +84,11 @@ jobs:
           - scheme: RemoteAgent-macOS
             app: Remote Agent
             asset: Remote-Agent-macOS-arm64.zip
+            appcast: Remote-Agent-macOS-appcast.xml   # the app's SUFeedURL
           - scheme: RemoteAgentServer
             app: Remote Agent Server
             asset: Remote-Agent-Server-macOS-arm64.zip
+            appcast: Remote-Agent-Server-macOS-appcast.xml
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7   # build-rad.sh compiles rad into the Server app
@@ -125,10 +131,18 @@ jobs:
         working-directory: apple
         run: |
           xcodebuild -version
-          # Tags set the app's version (and that of rad inside the Server app);
-          # other runs keep project.yml's.
+          # Tags set the app's version (and that of rad inside the Server app),
+          # and a build number for Sparkle that only grows: 0.3.0-beta.2 →
+          # 30002, 0.3.0 → 30099, as for Android. Other runs keep project.yml's,
+          # unless started with a version.
+          v=$INPUT_VERSION
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then v=${GITHUB_REF_NAME#v}; fi
           version=()
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=(MARKETING_VERSION="${GITHUB_REF_NAME#v}"); fi
+          if [ -n "$v" ]; then
+            [[ $v =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[A-Za-z]*\.?([0-9]+))? ]] || { echo "::error::Not a version: $v"; exit 1; }
+            m=("${BASH_REMATCH[@]}")
+            version=(MARKETING_VERSION="$v" CURRENT_PROJECT_VERSION=$((m[1] * 1000000 + m[2] * 10000 + m[3] * 100 + ${m[5]:-99})))
+          fi
           # Developer ID needs no provisioning profile for these entitlements.
           # Notarization wants a secure timestamp and no get-task-allow.
           if [ -n "$SIGNING_KEYCHAIN" ]; then
@@ -146,6 +160,7 @@ jobs:
         env:
           SCHEME: ${{ matrix.scheme }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          INPUT_VERSION: ${{ inputs.version }}
       - name: Package
         run: |
           app="apple/build/Build/Products/Release/$APP.app"
@@ -173,12 +188,28 @@ jobs:
           fi
           mkdir dist
           ditto -c -k --keepParent "$app" "dist/$ASSET"
+
+          # The app's update feed. Its notes are the release's, up to its
+          # Downloads; the release is usually written by the time the apps
+          # are built. Without the key, a run by hand makes no feed.
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            if [[ $GITHUB_REF == refs/tags/v* ]]; then echo "::error::SPARKLE_PRIVATE_KEY isn't set; see Development in README.md"; exit 1; fi
+          else
+            gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null | sed '/^## Downloads/,$d' > "$RUNNER_TEMP/notes.md" || true
+            download="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+            apple/scripts/appcast.sh "$app" "dist/$ASSET" "$download/$ASSET" \
+              "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" "$RUNNER_TEMP/notes.md" > "dist/$APPCAST"
+            cat "dist/$APPCAST"
+          fi
         env:
           APP: ${{ matrix.app }}
           ASSET: ${{ matrix.asset }}
+          APPCAST: ${{ matrix.appcast }}
           NOTARY_KEY_BASE64: ${{ secrets.NOTARY_API_KEY_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
       - name: Remove the signing keychain
         if: always() && env.SIGNING_KEYCHAIN != ''
         run: |
@@ -263,13 +294,20 @@ jobs:
             - **Remote Agent for Android** (`Remote-Agent-Android.apk`): the client app for Android 16 or later. Open it on the phone and allow installing from your browser; later releases install over it.
             - **Web client**: the Docker image `ghcr.io/buldezir/remote-agent-web`, tagged `latest` and with the version, such as `0.2.0`. `web/compose.example.yaml` runs it.
 
-            Both Mac apps need macOS 27 on Apple silicon. They are signed with Developer ID and notarized by Apple.
+            Both Mac apps need macOS 27 on Apple silicon. They are signed with Developer ID and notarized by Apple, and update themselves: **Check for Updates…** is in the Remote Agent menu, and in the Server app's menu bar menu.
         run: |
           sums=$(sha256sum *) && echo "$sums" > SHA256SUMS
+          # The Mac apps' update feeds go up last, so that an app that reads
+          # one finds its zip.
+          assets=() appcasts=()
+          for f in *; do
+            if [[ $f == *-appcast.xml ]]; then appcasts+=("$f"); else assets+=("$f"); fi
+          done
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" * --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
             prerelease=()
             if [[ $TAG == *-* ]]; then prerelease=(--prerelease); fi
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "${prerelease[@]}" *
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "${prerelease[@]}" "${assets[@]}"
           fi
+          if [ ${#appcasts[@]} -gt 0 ]; then gh release upload "$TAG" "${appcasts[@]}" --clobber; fi

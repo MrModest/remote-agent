@@ -93,39 +93,52 @@ struct SidebarToolbar: ToolbarContent {
     }
 }
 
-/// Starts a session on the open session's server, else on the first one
-/// connected; with more than one connected, a menu offers each.
+/// Starts a session in the project chosen in the Columns layout, else on the
+/// open session's server, else on the first one connected; with more than one
+/// connected, a menu offers each.
 struct NewSessionButton: View {
     @Environment(ServerStore.self) private var store
     @Environment(\.sessionActions) private var actions
     var selection: SessionRoute?
+    /// The Columns layout's collection: a project's starts the session in it.
+    var collection: SessionCollection?
 
     var body: some View {
         let connected = store.connections.filter { $0.state == .connected }
-        let first = connected.first { $0.server.id == selection?.serverID } ?? connected.first
-        if connected.count > 1, let first {
+        let target = store.newSessionTarget(in: collection, beside: selection)
+        if connected.count > 1, let target {
             Menu {
                 ForEach(connected, id: \.server.id) { c in
-                    Button("On \(c.server.name)") { actions.newSession(c) }
+                    Button("On \(c.server.name)") {
+                        // The chosen project's server starts in it.
+                        actions.newSession(c, projectID: c.server.id == target.connection.server.id ? target.projectID : "")
+                    }
                 }
             } label: {
                 Label("New session", systemImage: "square.and.pencil")
             } primaryAction: {
-                actions.newSession(first)
+                actions.startSession(target)
             }
-            .help("New session on \(first.server.name)")
+            .help(help(target, server: true))
             #if os(iOS)
             .keyboardShortcut("n") // On the Mac, File › New Session has it.
             #endif
         } else {
             Button("New session", systemImage: "square.and.pencil") {
-                if let first { actions.newSession(first) }
+                if let target { actions.startSession(target) }
             }
+            .help(target.map { help($0, server: false) } ?? "New session")
             #if os(iOS)
             .keyboardShortcut("n")
             #endif
-            .disabled(first == nil)
+            .disabled(target == nil)
         }
+    }
+
+    private func help(_ target: NewSessionRequest, server: Bool) -> String {
+        let project = target.connection.projects[target.projectID]?.name
+        let on = server ? " on \(target.connection.server.name)" : ""
+        return project.map { "New session in \($0)\(on)" } ?? "New session\(on)"
     }
 }
 
@@ -358,6 +371,18 @@ struct ServerMenuItems: View {
         Button("Reconnect", systemImage: "arrow.clockwise") { connection.retry() }
         Divider()
         Button("Remove \(name)…", systemImage: "trash", role: .destructive) { actions.remove(connection.server) }
+    }
+}
+
+/// A project's actions, for its context menu in the sidebar: a new session in it.
+struct ProjectMenuItems: View {
+    let connection: ServerConnection
+    let projectID: String
+    @Environment(\.sessionActions) private var actions
+
+    var body: some View {
+        Button("New Session", systemImage: "plus") { actions.newSession(connection, projectID: projectID) }
+            .disabled(connection.state != .connected)
     }
 }
 

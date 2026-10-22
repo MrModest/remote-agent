@@ -49,22 +49,22 @@ struct ServerSplitView: View {
         return connection.indexSynced && connection.sessions[route.sessionID] == nil
     }
 
-    /// Where a new session starts from the menu bar: on the open session's
+    /// Where a new session starts from the menu bar, as with the New Session
+    /// button: in the Columns layout's project, else on the open session's
     /// server, else on the first one connected.
-    private var defaultServer: ServerConnection? {
-        let connected = store.connections.filter { $0.state == .connected }
-        return connected.first { $0.server.id == route?.serverID } ?? connected.first
+    private var newSessionTarget: NewSessionRequest? {
+        store.newSessionTarget(in: layout == .columns ? collection.wrappedValue : nil, beside: route)
     }
 
     var body: some View {
         split
             .environment(\.sessionActions, SessionActions(
-                newSession: { newSession = NewSessionRequest(connection: $0) },
+                startSession: { newSession = $0 },
                 archive: { archiving = $0 },
                 delete: { deleting = $0 },
                 remove: { removing = $0 }))
             .sheet(item: $newSession) { request in
-                NewSessionView(connection: request.connection) { session in
+                NewSessionView(connection: request.connection, projectID: request.projectID) { session in
                     selection.wrappedValue = SessionRoute(serverID: request.connection.server.id, sessionID: session.id)
                 }
                 .appStyle()
@@ -77,8 +77,8 @@ struct ServerSplitView: View {
             .task(id: store.servers.map(\.id)) {
                 for c in store.connections where c.state == .idle { c.start() }
             }
-            .focusedSceneValue(\.newSession, defaultServer.map { c in
-                Binding { newSession != nil } set: { newSession = $0 ? NewSessionRequest(connection: c) : nil }
+            .focusedSceneValue(\.newSession, newSessionTarget.map { target in
+                Binding { newSession != nil } set: { newSession = $0 ? target : nil }
             })
             .focusedSceneValue(\.pairServer, $showAdd)
             .onChange(of: pendingLink) { _, link in
@@ -193,9 +193,4 @@ struct ServerSplitView: View {
             collection.wrappedValue = s.archived ? .archived : .all
         }
     }
-}
-
-private struct NewSessionRequest: Identifiable {
-    let id = UUID()
-    let connection: ServerConnection
 }

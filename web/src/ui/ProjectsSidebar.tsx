@@ -5,7 +5,7 @@ import type { ServerConnection } from "../store/serverConnection";
 import { storage } from "../store/storage";
 import { useServerStore } from "./context";
 import { navigate, type Route } from "./router";
-import { ConnectionStatus, ServerHeader, useCollapsed, type ServerActions } from "./SessionsSidebar";
+import { ConnectionStatus, ProjectPlus, ServerHeader, useCollapsed, type ServerActions } from "./SessionsSidebar";
 import { needsYou, needsYouFirst, type ServerSession } from "./sidebarLayout";
 import { SessionLink, TreeRow } from "./SidebarRows";
 
@@ -133,14 +133,17 @@ function ServerProjects({
             const open = !folded.has(key);
             return (
               <div key={g.projectID}>
-                <button className="project-row" onClick={() => setFolded(key, open)} aria-expanded={open}>
-                  <ChevronRight size={13} className={"chevron c-overlay" + (open ? " open" : "")} />
-                  <Folder size={14} className="c-accent" />
-                  <span className="project-row-name">{g.name}</span>
-                  {!open && g.items.some((i) => needsYou(i.session)) && <Hand size={12} strokeWidth={2.25} className="c-yellow" aria-label="Needs you" />}
-                  <span className="spacer" />
-                  <span className="c-overlay small">{g.items.length}</span>
-                </button>
+                <div className="row-plus-host project-row-host">
+                  <button className="project-row" onClick={() => setFolded(key, open)} aria-expanded={open}>
+                    <ChevronRight size={13} className={"chevron c-overlay" + (open ? " open" : "")} />
+                    <Folder size={14} className="c-accent" />
+                    <span className="project-row-name">{g.name}</span>
+                    {!open && g.items.some((i) => needsYou(i.session)) && <Hand size={12} strokeWidth={2.25} className="c-yellow" aria-label="Needs you" />}
+                    <span className="spacer" />
+                    <span className="c-overlay small row-plus-count">{g.items.length}</span>
+                  </button>
+                  <ProjectPlus connection={connection} projectID={g.projectID} name={g.name} actions={actions} />
+                </div>
                 {open && rows(g.items)}
               </div>
             );

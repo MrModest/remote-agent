@@ -57,14 +57,17 @@ import java.io.File
 
 private const val CUSTOM = "__custom"
 
-/** "New session". Mirrors apple/Shared/Views/NewSessionView.swift. */
+/**
+ * "New session", in `projectId` when given, else in the project used last.
+ * Mirrors apple/Shared/Views/NewSessionView.swift.
+ */
 @Composable
-fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCreated: (Session) -> Unit) {
+fun NewSessionDialog(connection: ServerConnection, projectId: String? = null, onDismiss: () -> Unit, onCreated: (Session) -> Unit) {
     val settings = LocalSettings.current
     val scope = rememberCoroutineScope()
     val projects by connection.projects.collectAsStateWithLifecycle()
     val harnesses by connection.harnesses.collectAsStateWithLifecycle()
-    var projectID by rememberSaveable { mutableStateOf("") }
+    var projectID by rememberSaveable { mutableStateOf(projectId ?: "") }
     var harnessID by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf("") }
     var customModel by rememberSaveable { mutableStateOf("") }

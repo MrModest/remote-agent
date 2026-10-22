@@ -30,6 +30,9 @@ struct ProjectsSidebar: View {
                         } label: {
                             ProjectLabel(name: group.name, count: group.items.count,
                                          waiting: !open.wrappedValue && group.items.contains(where: \.session.needsYou))
+                                // The whole row, past the name, takes a right-click.
+                                .contentShape(Rectangle())
+                                .contextMenu { ProjectMenuItems(connection: c, projectID: group.projectID) }
                         }
                         .paletteRows(Palette.mantle)
                     }

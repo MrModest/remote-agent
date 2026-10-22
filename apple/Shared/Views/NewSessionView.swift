@@ -215,7 +215,8 @@ struct NewSessionView: View {
                     effort = ""
                 }
             }
-            .onChange(of: projectID) { _, id in
+            // Initially too, for a project given at the start.
+            .onChange(of: projectID, initial: true) { _, id in
                 useWorktree = false
                 branches = []
                 guard project?.isGitRepo == true else { return }

@@ -11,13 +11,14 @@ import { Modal, Spinner } from "./primitives";
 
 const custom = "__custom";
 
-export function NewSession({ onClose, onCreated }: { onClose: () => void; onCreated: (s: Session) => void }) {
+/** Starts in `projectID` when given, else in the project used last. */
+export function NewSession({ projectID: initialProject, onClose, onCreated }: { projectID?: string; onClose: () => void; onCreated: (s: Session) => void }) {
   const connection = useConnection();
   useObserved(connection);
   const attachments = useMemo(() => new Attachments(connection), [connection]);
   useObserved(attachments);
 
-  const [projectID, setProjectID] = useState("");
+  const [projectID, setProjectID] = useState(initialProject ?? "");
   const [harnessID, setHarnessID] = useState("");
   const [model, setModel] = useState("");
   const [customModel, setCustomModel] = useState("");

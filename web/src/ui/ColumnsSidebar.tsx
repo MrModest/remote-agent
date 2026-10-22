@@ -5,7 +5,7 @@ import type { ServerConnection } from "../store/serverConnection";
 import { useServerStore } from "./context";
 import { Empty } from "./primitives";
 import { navigate, type Route } from "./router";
-import { ConnectionStatus, NewSessionButton, ServerHeader, SidebarBar, SidebarFoot, useCollapsed, type ServerActions } from "./SessionsSidebar";
+import { ConnectionStatus, NewSessionButton, ProjectPlus, ServerHeader, SidebarBar, SidebarFoot, useCollapsed, type ServerActions } from "./SessionsSidebar";
 import {
   allSessions,
   collectionSessions,
@@ -39,15 +39,16 @@ export function CollectionsSidebar({
   const active = allSessions(store, false);
   const archived = allSessions(store, true);
 
-  const link = (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint = "c-accent") => {
+  const link = (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint = "c-accent", plus?: ReactNode) => {
     const selected = sameCollection(c, collection);
     return (
-      <li>
+      <li className={plus ? "row-plus-host" : undefined}>
         <button className={"collection-row" + (selected ? " selected" : "")} onClick={() => setCollection(c)} aria-current={selected ? "page" : undefined}>
           <Icon size={15} strokeWidth={2} className={tint} />
           <span className="collection-row-name">{title}</span>
-          {count > 0 && <span className="c-overlay small">{count}</span>}
+          {count > 0 && <span className="c-overlay small row-plus-count">{count}</span>}
         </button>
+        {plus}
       </li>
     );
   };
@@ -89,7 +90,7 @@ function ServerCollections({
   connection: ServerConnection;
   expanded: boolean;
   setExpanded: (shown: boolean) => void;
-  link: (c: SessionCollection, title: string, Icon: LucideIcon, count: number) => ReactNode;
+  link: (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint?: string, plus?: ReactNode) => ReactNode;
   actions: ServerActions;
 }) {
   useObserved(connection);
@@ -104,7 +105,16 @@ function ServerCollections({
           <ConnectionStatus connection={connection} onNew={() => actions.newSession(connection)} />
           <ul className="session-list">
             {projects.map((p) => (
-              <Fragment key={p.id}>{link({ kind: "project", serverID: connection.server.id, projectID: p.id }, p.name, Folder, counts.get(p.id) ?? 0)}</Fragment>
+              <Fragment key={p.id}>
+                {link(
+                  { kind: "project", serverID: connection.server.id, projectID: p.id },
+                  p.name,
+                  Folder,
+                  counts.get(p.id) ?? 0,
+                  undefined,
+                  <ProjectPlus connection={connection} projectID={p.id} name={p.name} actions={actions} />,
+                )}
+              </Fragment>
             ))}
           </ul>
         </>
@@ -128,7 +138,7 @@ export function SessionListColumn({ collection, route, actions }: { collection: 
           {collectionTitle(collection, store)}
           <span className="bar-count">{items.length === 1 ? "1 session" : `${items.length} sessions`}</span>
         </h1>
-        <NewSessionButton onNew={actions.newSession} />
+        <NewSessionButton onNew={actions.newSession} collection={collection} />
       </header>
       <div className="list-scroll">
         {items.length === 0 ? (

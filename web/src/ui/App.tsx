@@ -24,7 +24,7 @@ import { SettingsView } from "./SettingsView";
 /** Sheets over the page. */
 type Sheet =
   | { kind: "pair"; link?: string }
-  | { kind: "new"; connection: ServerConnection }
+  | { kind: "new"; connection: ServerConnection; projectID?: string }
   | { kind: "settings" }
   | { kind: "archive"; connection: ServerConnection; session: Session }
   | { kind: "delete"; connection: ServerConnection; session: Session }
@@ -85,7 +85,7 @@ function Root() {
     settings: () => setSheet({ kind: "settings" }),
     remove: (s) => setSheet({ kind: "remove", server: s }),
     rename: (s) => setSheet({ kind: "rename", server: s }),
-    newSession: (c) => setSheet({ kind: "new", connection: c }),
+    newSession: (c, projectID) => setSheet({ kind: "new", connection: c, projectID }),
     archive: (c, s) => setSheet({ kind: "archive", connection: c, session: s }),
     delete: (c, s) => setSheet({ kind: "delete", connection: c, session: s }),
   };
@@ -127,7 +127,7 @@ function Root() {
       )}
       {sheet?.kind === "new" && (
         <ConnectionContext.Provider value={sheet.connection}>
-          <NewSession onClose={() => setSheet(undefined)} onCreated={(s) => navigate({ serverID: sheet.connection.server.id, sessionID: s.id })} />
+          <NewSession projectID={sheet.projectID} onClose={() => setSheet(undefined)} onCreated={(s) => navigate({ serverID: sheet.connection.server.id, sessionID: s.id })} />
         </ConnectionContext.Provider>
       )}
       {sheet?.kind === "settings" && <SettingsView onClose={() => setSheet(undefined)} />}

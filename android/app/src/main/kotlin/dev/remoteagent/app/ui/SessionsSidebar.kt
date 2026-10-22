@@ -97,22 +97,27 @@ fun RowScope.SidebarToolbar(servers: List<ServerState>, onAdd: () -> Unit, onSet
     }
 }
 
-/** Starts a session on the server connected; with more than one, a menu offers each. */
+/**
+ * Starts a session on the server connected; with more than one, a menu offers
+ * each. In the Columns layout, a project's collection starts it in that
+ * project, on its server.
+ */
 @Composable
-fun NewSessionButton(servers: List<ServerState>) {
+fun NewSessionButton(servers: List<ServerState>, collection: SessionCollection? = null) {
     val actions = LocalSessionActions.current
     val connected = servers.filter { it.state == ConnectionState.Connected }
     var menu by remember { mutableStateOf(false) }
+    fun projectOn(s: ServerState) = (collection as? SessionCollection.Project)?.takeIf { it.serverId == s.id }?.projectId
     Box {
         IconButton(
-            { if (connected.size == 1) actions.newSession(connected[0].connection) else menu = true },
+            { if (connected.size == 1) actions.newSession(connected[0].connection, projectOn(connected[0])) else menu = true },
             enabled = connected.isNotEmpty(),
             modifier = Modifier.testTag("new-session"),
         ) {
             Icon(painterResource(Icons.newSession), "New session")
         }
         DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-            for (s in connected) MenuItem("On ${s.name}", Icons.server) { menu = false; actions.newSession(s.connection) }
+            for (s in connected) MenuItem("On ${s.name}", Icons.server) { menu = false; actions.newSession(s.connection, projectOn(s)) }
         }
     }
 }
@@ -278,6 +283,18 @@ fun ServerHeader(s: ServerState, expanded: Boolean, onExpand: (Boolean) -> Unit,
         Box {
             IconButton({ menu = true }) { Icon(painterResource(Icons.more), "$name actions", Modifier.size(20.dp), tint = palette.subtext) }
             DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) { ServerMenuItems(s) { menu = false } }
+        }
+    }
+}
+
+/** A project's actions, for the menu a long press on its row opens: a new session in it. */
+@Composable
+fun ProjectMenu(expanded: Boolean, onDismiss: () -> Unit, s: ServerState, projectId: String) {
+    val actions = LocalSessionActions.current
+    DropdownMenu(expanded, onDismiss, containerColor = palette.mantle) {
+        MenuItem("New session", Icons.add, enabled = s.state == ConnectionState.Connected) {
+            onDismiss()
+            actions.newSession(s.connection, projectId)
         }
     }
 }

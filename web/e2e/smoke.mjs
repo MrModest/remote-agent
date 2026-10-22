@@ -216,9 +216,26 @@ await page.locator(".session-column .session-row").first().waitFor();
 await page.locator(".collection-row", { hasText: project }).click();
 await page.locator(".session-column .bar-title", { hasText: project }).waitFor();
 await shot("layout-columns");
+// A project's collection, and a project's +, start a new session in that
+// project. Forgetting the project used last leaves only them to choose it.
+const startsInProject = async (what) => {
+  const chosen = await page.locator(".form-row", { hasText: "Project" }).locator("select").evaluate((s) => s.selectedOptions[0]?.textContent);
+  if (chosen !== project) throw new Error(`${what} starts a session in ${chosen}, not ${project}`);
+  await page.getByRole("button", { name: "Cancel" }).click();
+};
+await page.evaluate(() => localStorage.removeItem("lastProject"));
+await page.locator(".session-column").getByRole("button", { name: "New session" }).click();
+await startsInProject("the project's collection");
+await page.locator(".collection-row", { hasText: project }).hover();
+await page.getByRole("button", { name: `New session in ${project}` }).click();
+await startsInProject("the collection's +");
 await layout("projects");
 await page.locator(".project-row", { hasText: project }).waitFor();
 await shot("layout-projects");
+await page.locator(".project-row", { hasText: project }).hover();
+await shot("project-plus");
+await page.getByRole("button", { name: `New session in ${project}` }).click();
+await startsInProject("the project's +");
 
 step("collapse the server, which a reload keeps");
 const header = page.locator(".server-header-main");

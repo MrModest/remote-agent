@@ -41,11 +41,14 @@ enum class SidebarLayout(val stored: String, val title: String, val summary: Str
  * dialogs for every layout.
  */
 class SessionActions(
-    val newSession: (ServerConnection) -> Unit = {},
+    val startSession: (ServerConnection, projectId: String?) -> Unit = { _, _ -> },
     val archive: (SessionRequest) -> Unit = {},
     val delete: (SessionRequest) -> Unit = {},
     val remove: (SavedServer) -> Unit = {},
-)
+) {
+    /** A new session on the server, in one of its projects when given. */
+    fun newSession(connection: ServerConnection, projectId: String? = null) = startSession(connection, projectId)
+}
 
 val LocalSessionActions = staticCompositionLocalOf { SessionActions() }
 

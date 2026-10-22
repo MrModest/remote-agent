@@ -35,6 +35,7 @@ struct CollectionsSidebar: View {
                     ForEach(projects(c), id: \.project.id) { p in
                         link(.project(serverID: c.server.id, projectID: p.project.id), p.project.name,
                              symbol: "folder", count: p.count)
+                            .contextMenu { ProjectMenuItems(connection: c, projectID: p.project.id) }
                     }
                 } header: {
                     ServerHeader(connection: c, expanded: expanded)
@@ -116,7 +117,7 @@ struct SessionListColumn: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                NewSessionButton(selection: selection)
+                NewSessionButton(selection: selection, collection: collection)
             }
         }
     }

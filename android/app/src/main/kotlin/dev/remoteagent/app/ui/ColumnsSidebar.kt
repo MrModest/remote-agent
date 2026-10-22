@@ -2,7 +2,8 @@ package dev.remoteagent.app.ui
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,7 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,8 +88,10 @@ private fun CollectionsSidebar(
     val collapsed = rememberCollapsedServers(servers)
 
     @Composable
-    fun Link(c: SessionCollection, title: String, @DrawableRes icon: Int, count: Int, tint: Color = palette.accent, modifier: Modifier = Modifier) =
-        CollectionRow(title, icon, count, tint, selected = c == collection, onClick = { onChoose(c) }, modifier = modifier)
+    fun Link(
+        c: SessionCollection, title: String, @DrawableRes icon: Int, count: Int, tint: Color = palette.accent,
+        modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null,
+    ) = CollectionRow(title, icon, count, tint, selected = c == collection, onClick = { onChoose(c) }, modifier = modifier, onLongClick = onLongClick)
 
     Box(modifier) {
         Screen(
@@ -108,7 +115,11 @@ private fun CollectionsSidebar(
                         if (!expanded) continue
                         connectionStatus(s)
                         items(collectionProjects(s), key = { "${s.id}/project/${it.first.id}" }) { (p, count) ->
-                            Link(SessionCollection.Project(s.id, p.id), p.name, Icons.folder, count, modifier = Modifier.animateItem())
+                            var menu by remember { mutableStateOf(false) }
+                            Box(Modifier.animateItem()) {
+                                Link(SessionCollection.Project(s.id, p.id), p.name, Icons.folder, count, onLongClick = { menu = true })
+                                ProjectMenu(menu, { menu = false }, s, p.id)
+                            }
                         }
                     }
                     if (archived.isNotEmpty()) {
@@ -122,7 +133,11 @@ private fun CollectionsSidebar(
     }
 }
 
-/** A collection in the sidebar: its icon, its name and how many sessions it has. */
+/**
+ * A collection in the sidebar: its icon, its name and how many sessions it
+ * has. A project's opens its menu on a long press.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CollectionRow(
     title: String,
@@ -132,12 +147,13 @@ private fun CollectionRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Box(modifier.fillMaxWidth().background(palette.mantle).padding(horizontal = 8.dp)) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Metrics.Corner.selection))
                 .background(if (selected) palette.surface0 else Color.Transparent)
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "Actions" })
                 .semantics { this.selected = selected }
                 .padding(horizontal = 8.dp, vertical = 11.dp)
                 .testTag("collection"),
@@ -176,7 +192,7 @@ private fun SessionListColumn(
         Screen(
             title = { Text(collection.title(servers), style = Type.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             background = palette.base,
-            actions = { NewSessionButton(servers) },
+            actions = { NewSessionButton(servers, collection) },
         ) { padding ->
             SidebarRefresh(servers, Modifier.padding(padding)) {
                 // Each collection's list starts at its top.

@@ -35,10 +35,23 @@ enum SidebarLayout: String, CaseIterable, Identifiable {
 /// What a sidebar's rows and menus ask of the split view, which shows the
 /// sheets and confirmations for every layout.
 struct SessionActions {
-    var newSession: (ServerConnection) -> Void = { _ in }
+    var startSession: (NewSessionRequest) -> Void = { _ in }
     var archive: (SessionRequest) -> Void = { _ in }
     var delete: (SessionRequest) -> Void = { _ in }
     var remove: (SavedServer) -> Void = { _ in }
+
+    /// A new session on the server, in one of its projects when given.
+    func newSession(_ connection: ServerConnection, projectID: String = "") {
+        startSession(NewSessionRequest(connection: connection, projectID: projectID))
+    }
+}
+
+/// A new session to start: on a server, in one of its projects, or with ""
+/// in the project used last.
+struct NewSessionRequest: Identifiable {
+    let id = UUID()
+    let connection: ServerConnection
+    var projectID = ""
 }
 
 extension EnvironmentValues {
@@ -78,6 +91,19 @@ extension ServerStore {
         connections
             .flatMap { c in (archived ? c.archivedSessions : c.activeSessions).map { ServerSession(connection: c, session: $0) } }
             .sorted { $0.session.updatedAt > $1.session.updatedAt }
+    }
+
+    /// Where a new session starts: in the project chosen in the Columns
+    /// layout, on its server; else on the open session's server; else on the
+    /// first one connected.
+    func newSessionTarget(in collection: SessionCollection?, beside open: SessionRoute?) -> NewSessionRequest? {
+        let connected = connections.filter { $0.state == .connected }
+        if case .project(let server, let project) = collection,
+           let c = connected.first(where: { $0.server.id == server }) {
+            return NewSessionRequest(connection: c, projectID: project)
+        }
+        return (connected.first { $0.server.id == open?.serverID } ?? connected.first)
+            .map { NewSessionRequest(connection: $0) }
     }
 
     /// Tries again where a connection gave up, and asks the others for their agents.

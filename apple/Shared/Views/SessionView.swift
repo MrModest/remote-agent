@@ -36,6 +36,7 @@ struct SessionView: View {
         // second child.
         VStack(spacing: 0) {
             transcript
+                .imagePreviews()
                 .opacity(covered ? 0 : 1)
                 .allowsHitTesting(!covered)
                 .accessibilityHidden(covered)

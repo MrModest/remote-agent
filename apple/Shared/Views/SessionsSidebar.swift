@@ -130,7 +130,7 @@ struct NewSessionButton: View {
 }
 
 /// A session's row in a sidebar list: choosing it opens the session, and a
-/// swipe or the context menu archives it.
+/// swipe or the context menu archives or deletes it.
 struct SessionLink<Content: View>: View {
     let item: ServerSession
     let selected: Bool
@@ -152,20 +152,21 @@ struct SessionLink<Content: View>: View {
         .listRowBackground(SidebarSelection(selected: selected, background: background))
         .swipeActions {
             if !item.session.archived {
-                Button("Archive", systemImage: "archivebox") { archive() }
+                Button("Archive", systemImage: "archivebox") { actions.archive(request) }
                     .tint(Palette.blue)
             }
+            Button("Delete", systemImage: "trash") { actions.delete(request) }
+                .tint(Palette.red)
         }
         .contextMenu {
             if !item.session.archived {
-                Button("Archive…", systemImage: "archivebox") { archive() }
+                Button("Archive…", systemImage: "archivebox") { actions.archive(request) }
             }
+            Button("Delete…", systemImage: "trash", role: .destructive) { actions.delete(request) }
         }
     }
 
-    private func archive() {
-        actions.archive(ArchiveRequest(session: item.session, connection: item.connection))
-    }
+    private var request: SessionRequest { SessionRequest(session: item.session, connection: item.connection) }
 }
 
 /// A row's background: the sidebar's colour, which iOS would otherwise cover

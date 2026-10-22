@@ -18,6 +18,7 @@ export interface ServerActions {
   settings: () => void;
   newSession: (c: ServerConnection) => void;
   archive: (c: ServerConnection, s: Session) => void;
+  delete: (c: ServerConnection, s: Session) => void;
   rename: (s: SavedServer) => void;
   remove: (s: SavedServer) => void;
 }

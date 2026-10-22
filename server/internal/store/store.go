@@ -188,6 +188,28 @@ func (w *W) PutSession(s *model.Session) error {
 	return w.Emit(model.Event{Stream: model.IndexStream, Type: model.EvSessionUpserted, Session: &b})
 }
 
+// DeleteSession removes a session, its turns and its transcript. Its stream
+// keeps its seq and holds only a session.removed event, so a client that
+// subscribes to it learns the session is gone.
+func (w *W) DeleteSession(id string) error {
+	for _, q := range []string{
+		`DELETE FROM sessions WHERE id=?`,
+		`DELETE FROM turns WHERE session_id=?`,
+	} {
+		if _, err := w.tx.ExecContext(w.ctx, q, id); err != nil {
+			return err
+		}
+	}
+	stream := model.SessionStream(id)
+	if _, err := w.tx.ExecContext(w.ctx, `DELETE FROM changes WHERE stream=?`, stream); err != nil {
+		return err
+	}
+	if err := w.Emit(model.Event{Stream: stream, Type: model.EvSessionRemoved, ID: id}); err != nil {
+		return err
+	}
+	return w.Emit(model.Event{Stream: model.IndexStream, Type: model.EvSessionRemoved, ID: id})
+}
+
 // SetItemCount records how many items a session has (the next item's order).
 func (w *W) SetItemCount(sessionID string, n int64) error {
 	_, err := w.tx.ExecContext(w.ctx, `UPDATE sessions SET item_count=? WHERE id=?`, n, sessionID)

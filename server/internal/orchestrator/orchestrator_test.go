@@ -933,6 +933,60 @@ func TestSetModeAndArchive(t *testing.T) {
 	}
 }
 
+func TestDelete(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, true)
+	kept := e.create(CreateSessionParams{Prompt: "hi"})
+	e.waitTurn(kept.ID, 1)
+	s := e.create(CreateSessionParams{Prompt: "write a.txt", Mode: "auto", Workspace: WorkspaceParams{Kind: model.WorkspaceWorktree}})
+	e.waitTurn(s.ID, 1)
+	// Deleting stops a turn that is running, and writes nothing after.
+	e.prompt(s.ID, "slow", "")
+	e.waitFor("turn 2 to start", func() bool { return len(e.turns(s.ID)) == 2 })
+	_, indexSeq, _ := e.st.Changes(bg, model.IndexStream, 0)
+	_, streamSeq, _ := e.st.Changes(bg, model.SessionStream(s.ID), 0)
+
+	if err := e.o.Delete(bg, s.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Session(bg, s.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("session still stored: %v", err)
+	}
+	if ts := e.turns(s.ID); len(ts) != 0 {
+		t.Errorf("turns left: %d", len(ts))
+	}
+	if _, err := os.Stat(s.Workspace.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("worktree still exists: %v", err)
+	}
+	if refs := run(t, e.dir, "git", "for-each-ref", "refs/ra/cp/"+s.ID+"/"); refs != "" {
+		t.Errorf("checkpoint refs left: %s", refs)
+	}
+	time.Sleep(300 * time.Millisecond) // past the item flush interval
+	// The stream keeps counting, and holds only the removal.
+	evs, last, err := e.st.Changes(bg, model.SessionStream(s.ID), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 || evs[0].Type != model.EvSessionRemoved || evs[0].ID != s.ID || last <= streamSeq || evs[0].Seq != last {
+		t.Errorf("session stream after %d: last %d, %+v", streamSeq, last, evs)
+	}
+	evs, _, _ = e.st.Changes(bg, model.IndexStream, indexSeq)
+	if len(evs) != 1 || evs[0].Type != model.EvSessionRemoved || evs[0].ID != s.ID {
+		t.Errorf("index events = %+v", evs)
+	}
+	if _, err := e.o.Prompt(bg, s.ID, "more", nil, ""); CodeOf(err) != CodeNotFound {
+		t.Errorf("prompt deleted session: %v", err)
+	}
+	if err := e.o.Delete(bg, s.ID, false); CodeOf(err) != CodeNotFound {
+		t.Errorf("delete twice: %v", err)
+	}
+	if sessions, _ := e.st.Sessions(bg); len(sessions) != 1 || sessions[0].ID != kept.ID {
+		t.Errorf("sessions = %+v", sessions)
+	}
+	e.prompt(kept.ID, "again", "")
+	e.waitTurn(kept.ID, 2)
+}
+
 func TestRecoverAfterCrash(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, false)

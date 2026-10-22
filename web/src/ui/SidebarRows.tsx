@@ -2,15 +2,17 @@ import { Archive, Clock, GitBranch, Hand, Square, TriangleAlert } from "lucide-r
 import { useEffect, useState, type ReactNode } from "react";
 import { contextFraction, modelName, parseDate, type Session } from "../protocol/models";
 import { Spinner } from "./primitives";
+import { DeleteButton } from "./SessionRow";
 import { needsYou, projectOf, shortAge, type ServerSession } from "./sidebarLayout";
 
-/** A session's row in a sidebar list: a click opens it, and on hover a
- *  button archives it. */
+/** A session's row in a sidebar list: a click opens it, and on hover
+ *  buttons archive or delete it. */
 export function SessionLink({
   item,
   selected,
   onOpen,
   onArchive,
+  onDelete,
   className = "",
   children,
 }: {
@@ -18,6 +20,7 @@ export function SessionLink({
   selected: boolean;
   onOpen: () => void;
   onArchive?: () => void;
+  onDelete?: () => void;
   className?: string;
   children: ReactNode;
 }) {
@@ -31,6 +34,7 @@ export function SessionLink({
           <Archive size={15} />
         </button>
       )}
+      {onDelete && <DeleteButton onDelete={onDelete} />}
     </div>
   );
 }

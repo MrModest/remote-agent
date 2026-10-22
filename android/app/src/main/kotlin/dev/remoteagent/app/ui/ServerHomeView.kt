@@ -71,7 +71,8 @@ fun ServerHomeView(
     var menu by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<SavedServer?>(null) }
     var showNew by rememberSaveable { mutableStateOf(false) }
-    var archiving by remember { mutableStateOf<ArchiveRequest?>(null) }
+    var archiving by remember { mutableStateOf<SessionRequest?>(null) }
+    var deleting by remember { mutableStateOf<SessionRequest?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var showArchived by rememberSaveable { mutableStateOf(false) }
 
@@ -116,7 +117,8 @@ fun ServerHomeView(
                     SessionRowItem(
                         s, projects[s.projectId], harnesses?.firstOrNull { it.id == s.harness }, background = palette.base,
                         onClick = { onOpenSession(s.id) },
-                        onArchive = { archiving = ArchiveRequest(s, connection) },
+                        onArchive = { archiving = SessionRequest(s, connection) },
+                        onDelete = { deleting = SessionRequest(s, connection) },
                     )
                 }
                 if (attention.isNotEmpty()) {
@@ -152,6 +154,7 @@ fun ServerHomeView(
     }
 
     ArchiveSessionDialog(archiving, onDismiss = { archiving = null })
+    DeleteSessionDialog(deleting, onDismiss = { deleting = null })
     RemoveServerDialog(removing, onDismiss = { removing = null }, onRemove = onRemoved)
     if (showNew) {
         NewSessionDialog(connection, onDismiss = { showNew = false }, onCreated = { s ->

@@ -478,6 +478,11 @@ class ServerConnection(
         client.callRaw("session.archive", params("sessionId" to sessionID, "removeWorktree" to removeWorktree))
     }
 
+    /** Deletes a session and its transcript for good; the index then drops it. */
+    suspend fun delete(sessionID: String, removeWorktree: Boolean) {
+        client.callRaw("session.delete", params("sessionId" to sessionID, "removeWorktree" to removeWorktree))
+    }
+
     companion object {
         /** Failed attempts in a row before the connection gives up. */
         const val MAX_ATTEMPTS = 5

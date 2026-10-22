@@ -139,7 +139,7 @@ Each event carries exactly one of `project`, `session`, `turn` or `item`, or `id
 | `project.upserted` | `project` | index |
 | `project.removed` | `id` | index |
 | `session.upserted` | `session` | index and `session:<id>` |
-| `session.removed` | `id` | index |
+| `session.removed` | `id` | index and `session:<id>` (the session was deleted) |
 | `turn.upserted` | `turn` | `session:<id>` |
 | `item.upserted` | `item` | `session:<id>` |
 
@@ -227,6 +227,7 @@ Approval {
 | `session.sendNow` | `{sessionId, itemId}` | `{}` (see below) |
 | `session.setMode` | `{sessionId, mode}` | `{}` |
 | `session.archive` | `{sessionId, removeWorktree?}` | `{}` (also ends the session's shell) |
+| `session.delete` | `{sessionId, removeWorktree?}` | `{}` (see below) |
 | `approval.respond` | `{commandId, sessionId, approvalId, optionId, message?, answers?}` | `{}` |
 | `subscribe` | `{stream, afterSeq?}` | `{stream, seq}` (see above) |
 | `unsubscribe` | `{stream}` | `{}` |
@@ -251,6 +252,7 @@ FileStat { path, oldPath?, status: "added"|"modified"|"deleted"|"renamed", addit
 ```
 
 - **Slash commands.** A prompt of `/<name>`, optionally followed by text for the command, runs the command; send it with `session.prompt` like any other. Its turn has the prompt as its user message and, for `/compact`, a `notice` item once the agent has summarized the conversation; the session's `context` then drops. The harness's `commands` are the ones the apps offer in a menu; others typed in a prompt go to the agent as they are.
+- **Deleting a session.** `session.delete` works on archived and unarchived sessions. It stops the agent and the session's shell, and deletes the session, its turns, its transcript and its checkpoints; `removeWorktree` deletes its worktree too, and the branch is kept either way. Images stay, since other sessions may show them. The session's stream then holds only a `session.removed` event, the next in its seq, which reaches its subscribers; later commands on the session are `not_found`.
 - **Queued prompts.** A prompt sent while a turn runs waits as a `queued` user message, and the next turn starts with it once the turn ends. Interrupting the turn cancels every queued prompt. `session.sendNow` sends one of them at once instead: rad interrupts the turn and starts the next turn with that prompt, ahead of the others, which stay queued behind it. A prompt no longer queued (it started, or was cancelled) is left as it is.
 - **Images in prompts.** `images` lists ids from `POST /v1/images`. A prompt needs text, images or both. An unknown id is `invalid`.
 - **Approval answers.** For a `question` approval, put `answers` (question text → chosen label; join multiple labels with `", "`) in the request, along with the option of kind `allow_once`.

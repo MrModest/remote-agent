@@ -581,6 +581,40 @@ func TestSessionOverWebSocket(t *testing.T) {
 	if _, e := c.call("subscribe", map[string]any{"stream": "bogus"}); e == nil || e.Code != "invalid" {
 		t.Errorf("bad stream: %+v", e)
 	}
+
+	// Deleting the session removes it from the index, and its subscribers
+	// hear so on its own stream, next in seq.
+	cursor = c.subscribe(stream, 0).sync.Seq
+	c.mustCall("session.delete", map[string]any{"sessionId": sess.ID}, nil)
+	removed := map[string]bool{}
+	for len(removed) < 2 {
+		f := c.note()
+		var p eventsParams
+		json.Unmarshal(f.Params, &p)
+		for _, ev := range p.Events {
+			if ev.Type != model.EvSessionRemoved || ev.ID != sess.ID {
+				continue
+			}
+			if p.Stream == stream && ev.Seq != cursor+1 {
+				t.Errorf("removal seq %d after %d", ev.Seq, cursor)
+			}
+			removed[p.Stream] = true
+		}
+	}
+	if !removed[stream] || !removed[model.IndexStream] {
+		t.Errorf("removal on %v", removed)
+	}
+	if gone := c.subscribe(stream, 0); len(gone.replay) != 1 || gone.replay[0].Type != model.EvSessionRemoved {
+		t.Errorf("deleted session's stream replays %+v", gone.replay)
+	}
+	var list struct{ Sessions []model.Session }
+	c.mustCall("session.list", nil, &list)
+	if len(list.Sessions) != 0 {
+		t.Errorf("sessions after delete = %+v", list.Sessions)
+	}
+	if _, e := c.call("session.delete", map[string]any{"sessionId": sess.ID}); e == nil || e.Code != "not_found" {
+		t.Errorf("delete twice: %+v", e)
+	}
 }
 
 func contains(xs []string, s string) bool {

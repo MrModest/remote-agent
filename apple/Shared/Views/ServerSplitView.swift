@@ -16,7 +16,8 @@ struct ServerSplitView: View {
     @AppStorage("sessionCollection") private var openCollection = ""
     @State private var showAdd = false
     @State private var newSession: NewSessionRequest?
-    @State private var archiving: ArchiveRequest?
+    @State private var archiving: SessionRequest?
+    @State private var deleting: SessionRequest?
     @State private var removing: SavedServer?
     #if os(macOS)
     @Environment(Notifier.self) private var notifier
@@ -60,6 +61,7 @@ struct ServerSplitView: View {
             .environment(\.sessionActions, SessionActions(
                 newSession: { newSession = NewSessionRequest(connection: $0) },
                 archive: { archiving = $0 },
+                delete: { deleting = $0 },
                 remove: { removing = $0 }))
             .sheet(item: $newSession) { request in
                 NewSessionView(connection: request.connection) { session in
@@ -117,6 +119,7 @@ struct ServerSplitView: View {
             } content: {
                 SessionListColumn(collection: collection.wrappedValue ?? .all, selection: selection)
                     .archiveSessionDialog($archiving)
+                    .deleteSessionDialog($deleting)
                     #if os(macOS)
                     .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 460)
                     #else
@@ -129,6 +132,7 @@ struct ServerSplitView: View {
             NavigationSplitView {
                 SessionsSidebar(layout: layout, selection: selection, showAdd: $showAdd)
                     .archiveSessionDialog($archiving)
+                    .deleteSessionDialog($deleting)
                     .removeServerDialog($removing)
                     #if os(macOS)
                     .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)

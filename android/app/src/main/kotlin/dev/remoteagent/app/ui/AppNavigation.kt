@@ -37,7 +37,9 @@ import dev.remoteagent.app.RemoteAgentApp
 import dev.remoteagent.app.platform.AppSettings
 import dev.remoteagent.app.platform.state
 import dev.remoteagent.core.net.PairingLink
+import dev.remoteagent.core.store.ServerConnection
 import dev.remoteagent.core.store.ServerStore
+import dev.remoteagent.core.store.SessionStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 
@@ -186,7 +188,11 @@ private fun AppNavigation(pendingLink: MutableStateFlow<PairingLink?>) {
                     LaunchedEffect(key) { backStack.remove(key) }
                 } else {
                     val connection = store.connection(server)
-                    SessionView(connection, connection.sessionStore(key.sessionId), onBack = { if (backStack.size > 1) backStack.removeLastOrNull() })
+                    val session = connection.sessionStore(key.sessionId)
+                    // Deleted, here or on another device: back to the server's
+                    // sessions, or on a tablet, none selected.
+                    if (isDeleted(connection, session)) LaunchedEffect(key) { backStack.remove(key) }
+                    SessionView(connection, session, onBack = { if (backStack.size > 1) backStack.removeLastOrNull() })
                 }
             }
             entry<SettingsKey> { SettingsView(onBack = { if (backStack.size > 1) backStack.removeLastOrNull() }) }
@@ -240,6 +246,18 @@ internal fun normalizedBackStack(stack: List<NavKey>, wide: Boolean): List<NavKe
             }
         }
     }
+
+/**
+ * The session is gone from the server: its stream says it was deleted, or the
+ * synced index doesn't have it. Before the index syncs, every session looks missing.
+ */
+@Composable
+private fun isDeleted(connection: ServerConnection, store: SessionStore): Boolean {
+    val synced by connection.indexSynced.collectAsStateWithLifecycle()
+    val sessions by connection.sessions.collectAsStateWithLifecycle()
+    val removed by store.removed.collectAsStateWithLifecycle()
+    return removed || (synced && store.sessionID !in sessions)
+}
 
 /** Opens a session: in place of the one shown beside the list, or pushed on a phone. */
 private fun NavBackStack<NavKey>.openSession(key: SessionKey) {

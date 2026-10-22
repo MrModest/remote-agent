@@ -14,6 +14,7 @@ struct SessionView: View {
     @AppStorage("terminalHeight") private var terminalHeight: Double = 280
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dismiss) private var dismiss
     #endif
     @State private var dictation = Dictation()
     @State private var attachments = Attachments()
@@ -24,6 +25,8 @@ struct SessionView: View {
     #endif
 
     private var session: Session? { store.session ?? connection.sessions[store.sessionID] }
+    /// The session was deleted, here or on another device.
+    private var deleted: Bool { store.removed || (connection.indexSynced && connection.sessions[store.sessionID] == nil) }
     private var harness: HarnessInfo? { session.flatMap { connection.harness($0.harness) } }
     private var project: Project? { session.flatMap { connection.projects[$0.projectId] } }
 
@@ -50,6 +53,13 @@ struct SessionView: View {
         #if os(macOS)
         .safeAreaInset(edge: .top, spacing: 0) {
             if inlineTitle, let s = session { titleHeader(s) }
+        }
+        #endif
+        #if os(iOS)
+        .onChange(of: deleted, initial: true) { _, deleted in
+            // An iPhone pushed the session, so it goes back to the list. The
+            // iPad's split view drops the session from its selection.
+            if deleted && UIDevice.current.userInterfaceIdiom == .phone { dismiss() }
         }
         #endif
         .navigationTitle(session?.title ?? "Session")

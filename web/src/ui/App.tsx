@@ -1,4 +1,4 @@
-import { ChevronRight, ChevronsUpDown, MessagesSquare, Monitor, Pencil, Plus, RefreshCw, Settings, Trash2, MessageCircleQuestion } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, MessagesSquare, Monitor, Pencil, Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "../protocol/models";
 import { pairingLinkInHash } from "../protocol/pairing";
@@ -15,7 +15,7 @@ import { navigate, useRoute, useWide, type Route } from "./router";
 import { ServerHome } from "./ServerHome";
 import { CollectionsSidebar, SessionListColumn } from "./ColumnsSidebar";
 import { reconnect, SessionsSidebar, type ServerActions } from "./SessionsSidebar";
-import { ArchiveConfirm } from "./SessionRow";
+import { ArchiveConfirm, DeleteConfirm } from "./SessionRow";
 import { useSettings } from "./settings";
 import { collectionSessions, parseCollection, storedCollection, type SessionCollection } from "./sidebarLayout";
 import { SessionView } from "./SessionView";
@@ -27,6 +27,7 @@ type Sheet =
   | { kind: "new"; connection: ServerConnection }
   | { kind: "settings" }
   | { kind: "archive"; connection: ServerConnection; session: Session }
+  | { kind: "delete"; connection: ServerConnection; session: Session }
   | { kind: "remove"; server: SavedServer }
   | { kind: "rename"; server: SavedServer };
 
@@ -86,6 +87,7 @@ function Root() {
     rename: (s) => setSheet({ kind: "rename", server: s }),
     newSession: (c) => setSheet({ kind: "new", connection: c }),
     archive: (c, s) => setSheet({ kind: "archive", connection: c, session: s }),
+    delete: (c, s) => setSheet({ kind: "delete", connection: c, session: s }),
   };
 
   let page;
@@ -94,7 +96,12 @@ function Root() {
   } else if (connection && route.sessionID) {
     page = (
       <ConnectionContext.Provider value={connection}>
-        <SessionView key={route.sessionID} sessionID={route.sessionID} onBack={() => navigate({ serverID: route.serverID })} />
+        <SessionView
+          key={route.sessionID}
+          sessionID={route.sessionID}
+          onBack={() => navigate({ serverID: route.serverID })}
+          onDeleted={() => navigate({ serverID: route.serverID }, true)}
+        />
       </ConnectionContext.Provider>
     );
   } else if (connection) {
@@ -125,6 +132,7 @@ function Root() {
       )}
       {sheet?.kind === "settings" && <SettingsView onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "archive" && <ArchiveConfirm connection={sheet.connection} session={sheet.session} onClose={() => setSheet(undefined)} />}
+      {sheet?.kind === "delete" && <DeleteConfirm connection={sheet.connection} session={sheet.session} onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "remove" && (
         <Confirm
           title={`Remove ${sheet.server.name}?`}
@@ -176,19 +184,21 @@ function Split({ route, connection, actions }: { route: Route; connection: Serve
     if (!shown) setCollection({ kind: open.archived ? "archived" : "all" });
   }, [layout, connection?.server.id, open?.id, open?.archived]);
 
+  // The open session is no longer on the server, as when it was deleted,
+  // here or on another device, so nothing is selected, as on iPad and the
+  // Mac. Only the synced index can tell: before it, every session looks missing.
+  const gone = !!connection && !!route.sessionID && connection.indexSynced && !open;
+  useEffect(() => {
+    if (gone) navigate({ serverID: route.serverID }, true);
+  }, [gone]);
+
   const detail = (
     <main className="detail">
-      {connection && route.sessionID ? (
-        connection.indexSynced && !connection.sessions.has(route.sessionID) ? (
-          <Empty icon={MessageCircleQuestion} title="Session not found">
-            <p>It is no longer on {connection.server.name}.</p>
-          </Empty>
-        ) : (
-          <ConnectionContext.Provider value={connection}>
-            {/* A new identity per session, so the draft and the subscription don't carry over. */}
-            <SessionView key={connection.server.id + route.sessionID} sessionID={route.sessionID} />
-          </ConnectionContext.Provider>
-        )
+      {connection && route.sessionID && !gone ? (
+        <ConnectionContext.Provider value={connection}>
+          {/* A new identity per session, so the draft and the subscription don't carry over. */}
+          <SessionView key={connection.server.id + route.sessionID} sessionID={route.sessionID} />
+        </ConnectionContext.Provider>
       ) : store.servers.length === 0 ? (
         <NoServers onPair={actions.pair} />
       ) : (

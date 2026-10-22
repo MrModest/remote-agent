@@ -70,7 +70,7 @@ type setModeParams struct {
 	Mode      string `json:"mode"`
 }
 
-type archiveParams struct {
+type archiveParams struct { // session.archive and session.delete
 	SessionID      string `json:"sessionId"`
 	RemoveWorktree bool   `json:"removeWorktree"`
 }
@@ -180,6 +180,13 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 			c.s.closeTerminal(p.SessionID)
 			defer c.s.closeTerminal(p.SessionID)
 			return nil, o.Archive(ctx, p.SessionID, p.RemoveWorktree)
+		})
+
+	case "session.delete":
+		return call(raw, func(p archiveParams) (any, error) {
+			c.s.closeTerminal(p.SessionID)
+			defer c.s.closeTerminal(p.SessionID)
+			return nil, o.Delete(ctx, p.SessionID, p.RemoveWorktree)
 		})
 
 	case "approval.respond":

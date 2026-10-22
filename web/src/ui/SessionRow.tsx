@@ -1,4 +1,4 @@
-import { Archive, GitBranch } from "lucide-react";
+import { Archive, GitBranch, Trash2 } from "lucide-react";
 import type { Session } from "../protocol/models";
 import type { ServerConnection } from "../store/serverConnection";
 import { HarnessBadge, RelativeTime, StatusIcon } from "./components";
@@ -6,7 +6,19 @@ import { useConnection } from "./context";
 import { Confirm } from "./primitives";
 
 /** A session in a list: its status, title, agent, project and branch. */
-export function SessionRow({ session, selected, onOpen, onArchive }: { session: Session; selected: boolean; onOpen: () => void; onArchive?: () => void }) {
+export function SessionRow({
+  session,
+  selected,
+  onOpen,
+  onArchive,
+  onDelete,
+}: {
+  session: Session;
+  selected: boolean;
+  onOpen: () => void;
+  onArchive?: () => void;
+  onDelete?: () => void;
+}) {
   const connection = useConnection();
   const project = connection.projects.get(session.projectId);
   const harness = connection.harness(session.harness);
@@ -34,7 +46,17 @@ export function SessionRow({ session, selected, onOpen, onArchive }: { session: 
           <Archive size={15} />
         </button>
       )}
+      {onDelete && <DeleteButton onDelete={onDelete} />}
     </div>
+  );
+}
+
+/** A row's button that asks to delete its session. */
+export function DeleteButton({ onDelete }: { onDelete: () => void }) {
+  return (
+    <button className="session-row-action icon-button" onClick={onDelete} title="Delete…" aria-label="Delete">
+      <Trash2 size={15} />
+    </button>
   );
 }
 
@@ -48,6 +70,22 @@ export function ArchiveConfirm({ connection, session, onClose }: { connection: S
       actions={[
         { label: "Archive", onSelect: () => connection.archive(session.id, false).catch(() => {}) },
         ...(worktree ? [{ label: "Archive and delete worktree", destructive: true, onSelect: () => connection.archive(session.id, true).catch(() => {}) }] : []),
+      ]}
+      onClose={onClose}
+    />
+  );
+}
+
+/** Asks before deleting a session for good, and whether to delete its worktree too. */
+export function DeleteConfirm({ connection, session, onClose }: { connection: ServerConnection; session: Session; onClose: () => void }) {
+  const worktree = session.workspace.kind === "worktree";
+  return (
+    <Confirm
+      title="Delete session?"
+      message={worktree ? `This can't be undone. The branch ${session.workspace.branch ?? ""} is kept either way.` : "This can't be undone."}
+      actions={[
+        { label: "Delete", destructive: true, onSelect: () => connection.deleteSession(session.id, false).catch(() => {}) },
+        ...(worktree ? [{ label: "Delete with worktree", destructive: true, onSelect: () => connection.deleteSession(session.id, true).catch(() => {}) }] : []),
       ]}
       onClose={onClose}
     />

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -55,6 +56,7 @@ type actor struct {
 	timer     *time.Timer
 
 	lastActive time.Time
+	deleted    bool // the session is gone from the store; nothing more is written
 }
 
 func newActor(o *Orchestrator, s *model.Session, p *model.Project) *actor {
@@ -66,6 +68,9 @@ func newActor(o *Orchestrator, s *model.Session, p *model.Project) *actor {
 }
 
 func (a *actor) write(ctx context.Context, f func(w *store.W) error) error {
+	if a.deleted {
+		return errorf(CodeNotFound, "session %s not found", a.sess.ID)
+	}
 	_, err := a.o.st.Write(ctx, func(w *store.W) error {
 		if err := f(w); err != nil {
 			return err
@@ -102,6 +107,9 @@ func (a *actor) putSession(w *store.W) error {
 func (a *actor) prompt(ctx context.Context, text string, refs []model.ImageRef, files []harness.Image, commandID string) (*model.Item, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.deleted {
+		return nil, errorf(CodeNotFound, "session %s not found", a.sess.ID)
+	}
 	if a.sess.Archived {
 		return nil, errorf(CodeConflict, "session is archived")
 	}
@@ -821,6 +829,36 @@ func (a *actor) archive(ctx context.Context, removeWorktree bool) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.dropWorkspace(ctx, removeWorktree)
+	a.sess.Archived = true
+	a.sess.Status = model.SessionStopped
+	return a.write(ctx, a.putSession)
+}
+
+// delete stops the agent and removes the session, its transcript, its
+// checkpoints and its diagnostic log; the worktree too when asked.
+func (a *actor) delete(ctx context.Context, removeWorktree bool) error {
+	a.mu.Lock()
+	// From here prompts are refused, and nothing is written: not even what
+	// stopping the agent would record.
+	a.deleted = true
+	rt := a.detachLocked("deleted")
+	a.mu.Unlock()
+	if rt != nil {
+		rt.Close()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dropWorkspace(ctx, removeWorktree)
+	if a.o.opt.LogsDir != "" {
+		os.Remove(filepath.Join(a.o.opt.LogsDir, a.sess.ID+".ndjson"))
+	}
+	_, err := a.o.st.Write(ctx, func(w *store.W) error { return w.DeleteSession(a.sess.ID) })
+	return err
+}
+
+// dropWorkspace deletes the session's checkpoints and, when asked, its worktree.
+func (a *actor) dropWorkspace(ctx context.Context, removeWorktree bool) {
 	if removeWorktree && a.sess.Workspace.Kind == model.WorkspaceWorktree && a.project != nil {
 		if err := gitx.RemoveWorktree(ctx, a.project.Path, a.sess.Workspace.Path); err != nil {
 			a.o.log.Warn("remove worktree", "err", err)
@@ -829,9 +867,6 @@ func (a *actor) archive(ctx context.Context, removeWorktree bool) error {
 	if a.project != nil && a.project.IsGitRepo {
 		gitx.DeleteRefs(ctx, a.project.Path, "refs/ra/cp/"+a.sess.ID+"/")
 	}
-	a.sess.Archived = true
-	a.sess.Status = model.SessionStopped
-	return a.write(ctx, a.putSession)
 }
 
 // refreshBranch records the branch checked out in the workspace, which the

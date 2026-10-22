@@ -42,7 +42,8 @@ enum class SidebarLayout(val stored: String, val title: String, val summary: Str
  */
 class SessionActions(
     val newSession: (ServerConnection) -> Unit = {},
-    val archive: (ArchiveRequest) -> Unit = {},
+    val archive: (SessionRequest) -> Unit = {},
+    val delete: (SessionRequest) -> Unit = {},
     val remove: (SavedServer) -> Unit = {},
 )
 

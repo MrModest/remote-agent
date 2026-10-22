@@ -423,6 +423,12 @@ public final class ServerConnection {
         let _: Empty = try await client.call("session.archive", P(sessionId: sessionID, removeWorktree: removeWorktree))
     }
 
+    /// Deletes a session and its transcript for good; the index then drops it.
+    public func delete(_ sessionID: String, removeWorktree: Bool) async throws {
+        struct P: Encodable, Sendable { var sessionId: String; var removeWorktree: Bool }
+        let _: Empty = try await client.call("session.delete", P(sessionId: sessionID, removeWorktree: removeWorktree))
+    }
+
     // MARK: Derived
 
     public var activeSessions: [Session] {

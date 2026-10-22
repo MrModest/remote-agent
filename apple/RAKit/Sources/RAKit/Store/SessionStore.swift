@@ -11,6 +11,8 @@ public final class SessionStore {
     /// Top-level transcript items in order (children of tool calls are excluded).
     public private(set) var transcript: [Item] = []
     public private(set) var synced = false
+    /// The session was deleted on the server: its stream says so.
+    public private(set) var removed = false
     /// Optimistic user messages not yet confirmed by the server, keyed by commandId.
     public private(set) var outbox: [String: Outgoing] = [:]
     /// The prompt being written and not sent yet. It outlives the session's
@@ -128,6 +130,13 @@ public final class SessionStore {
                 items[it.id] = it
                 return true
             }
+        case "session.removed":
+            session = nil
+            turns = [:]
+            items = [:]
+            outbox = [:]
+            removed = true
+            return true
         default: break
         }
         return false

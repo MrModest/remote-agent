@@ -36,7 +36,8 @@ enum SidebarLayout: String, CaseIterable, Identifiable {
 /// sheets and confirmations for every layout.
 struct SessionActions {
     var newSession: (ServerConnection) -> Void = { _ in }
-    var archive: (ArchiveRequest) -> Void = { _ in }
+    var archive: (SessionRequest) -> Void = { _ in }
+    var delete: (SessionRequest) -> Void = { _ in }
     var remove: (SavedServer) -> Void = { _ in }
 }
 

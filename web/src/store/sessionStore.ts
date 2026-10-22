@@ -29,6 +29,8 @@ export class SessionStore extends Observable {
   /** Top-level transcript items in order (children of tool calls are excluded). */
   transcript: Item[] = [];
   synced = false;
+  /** The session was deleted on the server: its stream says so. */
+  removed = false;
   /** Optimistic user messages not yet confirmed by the server, keyed by commandId. */
   outbox = new Map<string, Outgoing>();
 
@@ -152,6 +154,13 @@ export class SessionStore extends Observable {
         break;
       case "item.upserted":
         if (ev.item) this.items.set(ev.item.id, ev.item);
+        break;
+      case "session.removed":
+        this.session = undefined;
+        this.turns.clear();
+        this.items.clear();
+        this.outbox.clear();
+        this.removed = true;
         break;
     }
   }

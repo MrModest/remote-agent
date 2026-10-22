@@ -67,7 +67,8 @@ fun SessionRow(session: Session, project: Project?, harness: HarnessInfo?, modif
 }
 
 /**
- * A session in a list: a tap opens it, a swipe or a long press archives it.
+ * A session in a list: a tap opens it, a long press offers to archive or
+ * delete it, and a swipe archives it, or deletes one already archived.
  * The selected one is drawn as a surface inset from the edges, on the list's
  * [background], which also covers the swipe's colour behind the row.
  */
@@ -80,35 +81,53 @@ fun SessionRowItem(
     background: Color,
     onClick: () -> Unit,
     onArchive: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
 ) {
     var menu by remember { mutableStateOf(false) }
     Box(modifier) {
-        SwipeAction("Archive", Icons.archive, palette.blue, enabled = !session.archived, onSwipe = onArchive) {
+        SessionSwipe(session.archived, onArchive, onDelete) {
             Box(Modifier.background(background)) {
                 Box(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                         .background(if (selected) palette.surface0 else Color.Transparent, RoundedCornerShape(Metrics.Corner.selection))
-                        .combinedClickable(onClick = onClick, onLongClick = { if (!session.archived) menu = true })
+                        .combinedClickable(onClick = onClick, onLongClick = { menu = true })
                         .testTag("session-row"),
                 ) {
                     SessionRow(session, project, harness, Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
                 }
-                DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-                    MenuItem("Archive…", Icons.archive) { menu = false; onArchive() }
-                }
+                SessionRowMenu(menu, { menu = false }, session.archived, onArchive, onDelete)
             }
         }
     }
 }
 
-/** A session to archive, and the server it is on. */
-data class ArchiveRequest(val session: Session, val connection: ServerConnection)
+/** A row's swipe: Archive, or for a session already archived, Delete. */
+@Composable
+fun SessionSwipe(archived: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, content: @Composable () -> Unit) {
+    if (archived) {
+        SwipeAction("Delete", Icons.delete, palette.red, onSwipe = onDelete, content = content)
+    } else {
+        SwipeAction("Archive", Icons.archive, palette.blue, onSwipe = onArchive, content = content)
+    }
+}
+
+/** A row's long-press menu: Archive while it isn't archived, and Delete. */
+@Composable
+fun SessionRowMenu(expanded: Boolean, onDismiss: () -> Unit, archived: Boolean, onArchive: () -> Unit, onDelete: () -> Unit) {
+    DropdownMenu(expanded, onDismiss, containerColor = palette.mantle) {
+        if (!archived) MenuItem("Archive…", Icons.archive) { onDismiss(); onArchive() }
+        MenuItem("Delete…", Icons.delete, color = palette.red) { onDismiss(); onDelete() }
+    }
+}
+
+/** A session to archive or delete, and the server it is on. */
+data class SessionRequest(val session: Session, val connection: ServerConnection)
 
 /** Confirmation before archiving a session, which can also delete its worktree. */
 @Composable
-fun ArchiveSessionDialog(request: ArchiveRequest?, onDismiss: () -> Unit) {
+fun ArchiveSessionDialog(request: SessionRequest?, onDismiss: () -> Unit) {
     request ?: return
     val (s, connection) = request
     // On the connection's scope: the dialog leaves the composition as it confirms.
@@ -124,6 +143,26 @@ fun ArchiveSessionDialog(request: ArchiveRequest?, onDismiss: () -> Unit) {
         onConfirm = { archive(removeWorktree = false) },
         onDismiss = onDismiss,
         extra = if (worktree) "Archive and delete worktree" to { archive(removeWorktree = true) } else null,
+    )
+}
+
+/** Confirmation before deleting a session for good, which can also delete its worktree. */
+@Composable
+fun DeleteSessionDialog(request: SessionRequest?, onDismiss: () -> Unit) {
+    request ?: return
+    val (s, connection) = request
+    // On the connection's scope: the dialog leaves the composition as it confirms.
+    fun delete(removeWorktree: Boolean) {
+        connection.scope.launch { runCatching { connection.delete(s.id, removeWorktree) } }
+    }
+    val worktree = s.workspace.kind == Workspace.Kind.WORKTREE
+    ConfirmDialog(
+        title = "Delete session?",
+        message = if (worktree) "This can't be undone. The branch ${s.workspace.branch ?: ""} is kept either way." else "This can't be undone.",
+        confirm = "Delete",
+        onConfirm = { delete(removeWorktree = false) },
+        onDismiss = onDismiss,
+        extra = if (worktree) "Delete with worktree" to { delete(removeWorktree = true) } else null,
     )
 }
 

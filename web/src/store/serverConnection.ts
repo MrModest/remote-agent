@@ -472,6 +472,11 @@ export class ServerConnection extends Observable implements SessionHost {
     await this.client.call("session.archive", { sessionId, removeWorktree });
   }
 
+  /** Deletes a session and its transcript for good; the index then drops it. */
+  async deleteSession(sessionId: string, removeWorktree: boolean) {
+    await this.client.call("session.delete", { sessionId, removeWorktree });
+  }
+
   // Derived
 
   get activeSessions(): Session[] {

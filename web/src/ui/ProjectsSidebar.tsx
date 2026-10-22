@@ -113,6 +113,7 @@ function ServerProjects({
             selected={route.serverID === id && route.sessionID === item.session.id}
             onOpen={() => navigate({ serverID: id, sessionID: item.session.id })}
             onArchive={() => actions.archive(connection, item.session)}
+            onDelete={() => actions.delete(connection, item.session)}
           >
             <TreeRow item={item} />
           </SessionLink>

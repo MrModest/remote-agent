@@ -45,6 +45,7 @@ export function InboxSidebar({ route, actions }: { route: Route; actions: Server
             selected={route.serverID === item.connection.server.id && route.sessionID === item.session.id}
             onOpen={() => navigate({ serverID: item.connection.server.id, sessionID: item.session.id })}
             onArchive={() => actions.archive(item.connection, item.session)}
+            onDelete={() => actions.delete(item.connection, item.session)}
           >
             <InboxRow item={item} showsServer={showsServer} />
           </SessionLink>

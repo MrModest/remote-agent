@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,8 +59,9 @@ import kotlin.math.roundToInt
 // The tablet sidebars' session rows. Mirrors apple/Shared/Views/SidebarRows.swift.
 
 /**
- * A session's row in a sidebar list: a tap opens it, a swipe or a long press
- * archives it. The selection is drawn as a surface inset from the edges, on
+ * A session's row in a sidebar list: a tap opens it, a long press offers to
+ * archive or delete it, and a swipe archives it, or deletes one already
+ * archived. The selection is drawn as a surface inset from the edges, on
  * the list's [background], which also covers the swipe's colour behind the row.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -77,23 +77,22 @@ fun SessionLink(
 ) {
     val actions = LocalSessionActions.current
     var menu by remember { mutableStateOf(false) }
-    val archived = item.session.archived
-    val archive = { actions.archive(ArchiveRequest(item.session, item.server.connection)) }
+    val request = SessionRequest(item.session, item.server.connection)
+    val archive = { actions.archive(request) }
+    val delete = { actions.delete(request) }
     Box(modifier) {
-        SwipeAction("Archive", Icons.archive, palette.blue, enabled = !archived, onSwipe = archive) {
+        SessionSwipe(item.session.archived, archive, delete) {
             Box(Modifier.background(background)) {
                 Box(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(Metrics.Corner.selection))
                         .background(if (selected) palette.surface0 else Color.Transparent)
-                        .combinedClickable(onClick = { onOpen(item.key) }, onLongClick = { if (!archived) menu = true })
+                        .combinedClickable(onClick = { onOpen(item.key) }, onLongClick = { menu = true })
                         .padding(padding)
                         .testTag("session-row"),
                 ) {
                     content()
                 }
-                DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-                    MenuItem("Archive…", Icons.archive) { menu = false; archive() }
-                }
+                SessionRowMenu(menu, { menu = false }, item.session.archived, archive, delete)
             }
         }
     }

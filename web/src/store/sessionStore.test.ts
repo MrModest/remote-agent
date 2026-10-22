@@ -1,6 +1,6 @@
 // As apple/RAKit/Tests/RAKitTests/StoreTests.swift.
 import { describe, expect, it, vi } from "vitest";
-import type { Event, Item } from "../protocol/models";
+import type { Event, Item, Session } from "../protocol/models";
 import { RPCError } from "../protocol/rpc";
 import { SessionStore, type SessionHost } from "./sessionStore";
 
@@ -91,6 +91,34 @@ describe("SessionStore", () => {
     expect(s.items.has("x")).toBe(false);
     expect(s.live).toBe(false);
     expect(h.subscribed).toBe(1);
+  });
+
+  it("empties when the session is deleted", async () => {
+    const s = new SessionStore("s", host());
+    s.synchronized(1, true);
+    s.setSession({ id: "s" } as Session);
+    s.apply([event(2, "a", 1, "first")]);
+    await s.send("pending");
+    expect(s.removed).toBe(false);
+    s.apply([{ stream: "session:s", seq: 3, type: "session.removed", id: "s", ts: "2026-10-09T12:00:00Z" }]);
+    expect(s.removed).toBe(true);
+    expect(s.session).toBeUndefined();
+    expect(s.transcript).toEqual([]);
+    expect(s.items.size).toBe(0);
+    expect(s.turns.size).toBe(0);
+    expect(s.outbox.size).toBe(0);
+  });
+
+  it("is removed when a later subscription replays the deletion", () => {
+    const s = new SessionStore("s", undefined);
+    s.synchronized(2, true);
+    s.apply([event(3, "a", 1, "first")]);
+    // Away while it was deleted: the stream now holds only the removal.
+    s.beginReplay();
+    s.apply([{ stream: "session:s", seq: 4, type: "session.removed", id: "s" }]);
+    s.synchronized(4, true);
+    expect(s.removed).toBe(true);
+    expect(s.transcript).toEqual([]);
   });
 
   it("nests children under their parent", () => {

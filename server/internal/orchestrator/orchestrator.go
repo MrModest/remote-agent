@@ -323,6 +323,23 @@ func (o *Orchestrator) Archive(ctx context.Context, sessionID string, removeWork
 	return nil
 }
 
+// Delete removes a session for good, archived or not: its agent stops, and
+// its transcript and checkpoints are deleted. removeWorktree deletes its
+// worktree too; its branch is kept.
+func (o *Orchestrator) Delete(ctx context.Context, sessionID string, removeWorktree bool) error {
+	a, err := o.actor(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	err = a.delete(ctx, removeWorktree)
+	// The actor refuses everything now; if the store kept the session, the
+	// next command loads it afresh.
+	o.mu.Lock()
+	delete(o.actors, sessionID)
+	o.mu.Unlock()
+	return err
+}
+
 // Recover fixes up state left behind by a previous process: running turns are
 // interrupted, pending approvals expire, streaming items are finalized, and
 // background tasks are gone.

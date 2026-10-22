@@ -49,8 +49,11 @@ targets:
       path: iOS/Info.plist
       properties:
         CFBundleDisplayName: Remote Agent
-        CFBundleShortVersionString: "0.1"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only the encryption that comes with iOS (TLS), which is exempt, so
+        # TestFlight doesn't hold each build for the export compliance question.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false  # one window on iPad, as on the Mac
@@ -77,6 +80,7 @@ targets:
       base:
         PRODUCT_NAME: RemoteAgent
         PRODUCT_MODULE_NAME: RemoteAgent
+        MARKETING_VERSION: "0.1"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic

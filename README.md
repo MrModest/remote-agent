@@ -416,4 +416,12 @@ gh secret set SPARKLE_PRIVATE_KEY < ~/sparkle/private-key
 
 To try the updates before a release, run the workflow by hand with a version, such as `0.10.0-test.1`: its Mac apps then offer and take updates, like a release's.
 
+The iPhone and iPad app goes to TestFlight from a Mac where Xcode › Settings › Accounts has an Apple ID on the team in `apple/Local.xcconfig`, after its app record exists in App Store Connect (bundle ID `dev.remote-agent.app`):
+
+```bash
+apple/scripts/testflight.sh 0.11.0      # or 0.11.0-beta.1, which goes up as 0.11.0 build 110001
+```
+
+It archives the app and uploads it; Xcode signs it with the team's Apple Distribution certificate, making it the first time. App Store Connect takes each build number once, so each version or beta goes up once.
+
 The raw protocol frames for each session are logged to `<data>/logs/<sessionId>.ndjson`.

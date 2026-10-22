@@ -237,6 +237,57 @@ await shot("project-plus");
 await page.getByRole("button", { name: `New session in ${project}` }).click();
 await startsInProject("the project's +");
 
+step("forget a project");
+await page.getByRole("button", { name: "New session" }).first().click();
+const projectPicker = page.locator(".form-row", { hasText: "Project" }).locator("select");
+await projectPicker.selectOption({ label: project });
+// The server keeps a project while it has sessions that aren't archived.
+await page.getByRole("button", { name: `Forget ${project}` }).click();
+await page.getByText(/archive them first/).waitFor();
+await shot("forget-refused");
+const addRoot = async () => {
+  await page.getByRole("button", { name: "Add a folder…" }).click();
+  await page.locator(".folder-row").first().click(); // the root
+  await page.getByRole("button", { name: "Use folder" }).click();
+  // The folder added is chosen once the server answers.
+  const added = await page.waitForFunction((p) => {
+    const name = document.querySelector(".form-row select").selectedOptions[0]?.textContent;
+    return name !== p && name !== "Choose…" && name;
+  }, project);
+  return added.jsonValue();
+};
+const root = await addRoot();
+// The Projects layout shows it without sessions, until it's forgotten.
+const rootRow = page.locator(".project-row", { hasText: root });
+await rootRow.waitFor();
+if ((await rootRow.locator(".row-plus-count").textContent()) !== "0") throw new Error(`${root} doesn't show that it has no sessions`);
+await shot("project-without-sessions");
+await page.getByRole("button", { name: `Forget ${root}` }).click();
+await page.waitForFunction((name) => {
+  const s = document.querySelector(".form-row select");
+  return s.value === "" && ![...s.options].some((o) => o.textContent === name);
+}, root);
+await rootRow.waitFor({ state: "detached" });
+await addRoot();
+await page.getByRole("button", { name: "Cancel" }).click();
+// From its menu in the sidebar too. In three columns, forgetting the chosen
+// project shows All Sessions.
+await layout("columns");
+const projectMenu = async (name) => {
+  await page.locator(".collection-row", { hasText: name }).hover();
+  await page.getByRole("button", { name: `${name} actions` }).click();
+};
+await projectMenu(project);
+if (!(await page.getByRole("menuitem", { name: "Forget project" }).isDisabled())) throw new Error(`${project} can be forgotten with its sessions`);
+await page.keyboard.press("Escape");
+await page.locator(".collection-row", { hasText: root }).click();
+await projectMenu(root);
+await shot("project-menu");
+await page.getByRole("menuitem", { name: "Forget project" }).click();
+await page.locator(".collection-row", { hasText: root }).waitFor({ state: "detached" });
+await page.locator(".session-column .bar-title", { hasText: "All Sessions" }).waitFor();
+await layout("projects");
+
 step("collapse the server, which a reload keeps");
 const header = page.locator(".server-header-main");
 await header.click();

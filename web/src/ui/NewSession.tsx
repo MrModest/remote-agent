@@ -31,6 +31,8 @@ export function NewSession({ projectID: initialProject, onClose, onCreated }: { 
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string>();
+  /** Why the chosen project wasn't forgotten, beside its Forget button. */
+  const [forgetError, setForgetError] = useState<string>();
   const [browsing, setBrowsing] = useState(false);
 
   const project = connection.projects.get(projectID);
@@ -88,6 +90,7 @@ export function NewSession({ projectID: initialProject, onClose, onCreated }: { 
   }, [chosenModel]);
 
   useEffect(() => {
+    setForgetError(undefined);
     setUseWorktree(false);
     setBranches([]);
     if (!project?.isGitRepo) return;
@@ -127,6 +130,18 @@ export function NewSession({ projectID: initialProject, onClose, onCreated }: { 
       setError((e as Error).message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Takes the project off the server's list, which it refuses while the
+  // project has sessions that aren't archived.
+  const forget = async (id: string) => {
+    setForgetError(undefined);
+    try {
+      await connection.removeProject(id);
+      setProjectID((p) => (p === id ? "" : p));
+    } catch (e) {
+      setForgetError((e as Error).message);
     }
   };
 
@@ -181,7 +196,24 @@ export function NewSession({ projectID: initialProject, onClose, onCreated }: { 
           <button className="form-row link with-icon" onClick={() => setBrowsing(true)}>
             <FolderPlus size={17} /> Add a folder…
           </button>
-          {project && <div className="form-row mono small hint">{project.path}</div>}
+          {project && (
+            <div className="form-row">
+              <span className="mono small hint spacer">{project.path}</span>
+              <button
+                className="link"
+                onClick={() => forget(project.id)}
+                title={`Take ${project.name} off the list of projects. The folder stays.`}
+                aria-label={`Forget ${project.name}`}
+              >
+                Forget
+              </button>
+            </div>
+          )}
+          {project && forgetError && (
+            <div className="form-row small c-red">
+              <TriangleAlert size={15} /> {forgetError}
+            </div>
+          )}
         </section>
 
         <h4 className="form-header">Agent</h4>

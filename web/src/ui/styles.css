@@ -320,6 +320,7 @@ svg { flex: none; }
 .disclosure-header .chevron { margin-left: auto; }
 .chevron { transition: transform 0.15s; }
 .chevron.open { transform: rotate(90deg); }
+.invisible { visibility: hidden; }
 
 .banner {
   margin: 8px 12px;
@@ -627,7 +628,8 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
   white-space: nowrap;
 }
 .collection-row-name { flex: 1; }
-/* A project's row and its +, which on hover takes the count's place. */
+/* A project's row and its + and ⋯, which on hover take the count's place,
+   and stay while the menu is open. */
 .row-plus-host { display: flex; align-items: center; }
 .row-plus-host > .collection-row,
 .row-plus-host > .project-row { flex: 1; min-width: 0; }
@@ -635,9 +637,11 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
 .project-row-host > .project-row { width: auto; margin: 0; }
 .row-plus { display: none; min-width: 26px; height: 26px; color: var(--subtext); }
 .row-plus-host:hover .row-plus,
-.row-plus-host:has(:focus-visible) .row-plus { display: inline-flex; }
+.row-plus-host:has(:focus-visible) .row-plus,
+.row-plus-host:has(.row-plus[aria-expanded="true"]) .row-plus { display: inline-flex; }
 .row-plus-host:hover .row-plus-count,
-.row-plus-host:has(:focus-visible) .row-plus-count { display: none; }
+.row-plus-host:has(:focus-visible) .row-plus-count,
+.row-plus-host:has(.row-plus[aria-expanded="true"]) .row-plus-count { display: none; }
 @media (hover: none) {
   .row-plus { display: inline-flex; }
 }

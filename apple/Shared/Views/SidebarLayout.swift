@@ -100,7 +100,8 @@ extension ServerStore {
         let connected = connections.filter { $0.state == .connected }
         if case .project(let server, let project) = collection,
            let c = connected.first(where: { $0.server.id == server }) {
-            return NewSessionRequest(connection: c, projectID: project)
+            // Its server alone, if the project was forgotten while chosen.
+            return NewSessionRequest(connection: c, projectID: c.projects[project] == nil ? "" : project)
         }
         return (connected.first { $0.server.id == open?.serverID } ?? connected.first)
             .map { NewSessionRequest(connection: $0) }
@@ -130,6 +131,10 @@ enum SessionCollection: Hashable {
         case "project" where parts.count == 3: self = .project(serverID: parts[1], projectID: parts[2])
         default: return nil
         }
+    }
+
+    var isProject: Bool {
+        if case .project = self { true } else { false }
     }
 
     var stored: String {

@@ -5,13 +5,14 @@ import type { ServerConnection } from "../store/serverConnection";
 import { storage } from "../store/storage";
 import { useServerStore } from "./context";
 import { navigate, type Route } from "./router";
-import { ConnectionStatus, ProjectPlus, ServerHeader, useCollapsed, type ServerActions } from "./SessionsSidebar";
+import { ConnectionStatus, ProjectActions, ServerHeader, useCollapsed, type ServerActions } from "./SessionsSidebar";
 import { needsYou, needsYouFirst, type ServerSession } from "./sidebarLayout";
 import { SessionLink, TreeRow } from "./SidebarRows";
 
 /** The Projects layout: each server a section, its projects folding open to
  *  their sessions, a line each, what needs you first. The projects come in
- *  order of their latest session; a server's archived sessions fold up last. */
+ *  order of their latest session, those without any by name after them; a
+ *  server's archived sessions fold up last. */
 export function ProjectsSidebar({ route, actions }: { route: Route; actions: ServerActions }) {
   const store = useServerStore();
   useObserved(store);
@@ -55,7 +56,8 @@ interface ProjectGroup {
   items: ServerSession[];
 }
 
-/** The server's projects with sessions, the one worked in last first. */
+/** The server's projects: those with sessions, the one worked in last
+ *  first, then the others by name. */
 function groups(connection: ServerConnection): ProjectGroup[] {
   const byProject = new Map<string, ServerSession[]>();
   for (const session of connection.activeSessions) {
@@ -63,11 +65,13 @@ function groups(connection: ServerConnection): ProjectGroup[] {
     list.push({ connection, session });
     byProject.set(session.projectId, list);
   }
-  return [...byProject].map(([id, items]) => ({
+  const worked = [...byProject].map(([id, items]) => ({
     projectID: id,
     name: connection.projects.get(id)?.name ?? "Project",
     items: needsYouFirst(items),
   }));
+  const idle = connection.sortedProjects.filter((p) => !byProject.has(p.id)).map((p) => ({ projectID: p.id, name: p.name, items: [] }));
+  return [...worked, ...idle];
 }
 
 function ServerProjects({
@@ -131,18 +135,20 @@ function ServerProjects({
           {groups(connection).map((g) => {
             const key = `${id}/${g.projectID}`;
             const open = !folded.has(key);
+            // Without sessions, it has nothing to fold open.
+            const empty = g.items.length === 0;
             return (
               <div key={g.projectID}>
                 <div className="row-plus-host project-row-host">
-                  <button className="project-row" onClick={() => setFolded(key, open)} aria-expanded={open}>
-                    <ChevronRight size={13} className={"chevron c-overlay" + (open ? " open" : "")} />
+                  <button className="project-row" onClick={() => !empty && setFolded(key, open)} aria-expanded={empty ? undefined : open}>
+                    <ChevronRight size={13} className={"chevron c-overlay" + (open ? " open" : "") + (empty ? " invisible" : "")} />
                     <Folder size={14} className="c-accent" />
                     <span className="project-row-name">{g.name}</span>
                     {!open && g.items.some((i) => needsYou(i.session)) && <Hand size={12} strokeWidth={2.25} className="c-yellow" aria-label="Needs you" />}
                     <span className="spacer" />
                     <span className="c-overlay small row-plus-count">{g.items.length}</span>
                   </button>
-                  <ProjectPlus connection={connection} projectID={g.projectID} name={g.name} actions={actions} />
+                  <ProjectActions connection={connection} projectID={g.projectID} name={g.name} actions={actions} />
                 </div>
                 {open && rows(g.items)}
               </div>

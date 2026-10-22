@@ -192,6 +192,15 @@ function Split({ route, connection, actions }: { route: Route; connection: Serve
     if (gone) navigate({ serverID: route.serverID }, true);
   }, [gone]);
 
+  // The Columns layout's project is no longer on the server, as when it was
+  // forgotten, here or on another device, so All Sessions shows instead.
+  // Only the synced index can tell.
+  const chosen = collection.kind === "project" ? connections.find((c) => c.server.id === collection.serverID) : undefined;
+  const projectGone = collection.kind === "project" && !!chosen?.indexSynced && !chosen.projects.has(collection.projectID);
+  useEffect(() => {
+    if (projectGone) setCollection({ kind: "all" });
+  }, [projectGone]);
+
   const detail = (
     <main className="detail">
       {connection && route.sessionID && !gone ? (

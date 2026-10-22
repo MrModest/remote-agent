@@ -5,7 +5,7 @@ import type { ServerConnection } from "../store/serverConnection";
 import { useServerStore } from "./context";
 import { Empty } from "./primitives";
 import { navigate, type Route } from "./router";
-import { ConnectionStatus, NewSessionButton, ProjectPlus, ServerHeader, SidebarBar, SidebarFoot, useCollapsed, type ServerActions } from "./SessionsSidebar";
+import { ConnectionStatus, NewSessionButton, ProjectActions, ServerHeader, SidebarBar, SidebarFoot, useCollapsed, type ServerActions } from "./SessionsSidebar";
 import {
   allSessions,
   collectionSessions,
@@ -20,7 +20,7 @@ import { SessionLink, SessionListRow } from "./SidebarRows";
 
 /** The Columns layout's sidebar, as Mail's: the collections a session can
  *  be in. What needs you, what is working and every session, then each
- *  server's projects that have sessions, then the archive. The sessions are
+ *  server's projects, then the archive. The sessions are
  *  a column of their own beside it (`SessionListColumn`), which keeps the
  *  sidebar to two levels, as the HIG asks. */
 export function CollectionsSidebar({
@@ -46,7 +46,8 @@ export function CollectionsSidebar({
         <button className={"collection-row" + (selected ? " selected" : "")} onClick={() => setCollection(c)} aria-current={selected ? "page" : undefined}>
           <Icon size={15} strokeWidth={2} className={tint} />
           <span className="collection-row-name">{title}</span>
-          {count > 0 && <span className="c-overlay small row-plus-count">{count}</span>}
+          {/* A project shows that it has none; the others, as Mail's, nothing. */}
+          {(count > 0 || c.kind === "project") && <span className="c-overlay small row-plus-count">{count}</span>}
         </button>
         {plus}
       </li>
@@ -96,7 +97,6 @@ function ServerCollections({
   useObserved(connection);
   const counts = new Map<string, number>();
   for (const s of connection.activeSessions) counts.set(s.projectId, (counts.get(s.projectId) ?? 0) + 1);
-  const projects = connection.sortedProjects.filter((p) => counts.has(p.id));
   return (
     <section className="server-section" aria-label={connection.server.name}>
       <ServerHeader connection={connection} expanded={expanded} setExpanded={setExpanded} actions={actions} />
@@ -104,7 +104,7 @@ function ServerCollections({
         <>
           <ConnectionStatus connection={connection} onNew={() => actions.newSession(connection)} />
           <ul className="session-list">
-            {projects.map((p) => (
+            {connection.sortedProjects.map((p) => (
               <Fragment key={p.id}>
                 {link(
                   { kind: "project", serverID: connection.server.id, projectID: p.id },
@@ -112,7 +112,7 @@ function ServerCollections({
                   Folder,
                   counts.get(p.id) ?? 0,
                   undefined,
-                  <ProjectPlus connection={connection} projectID={p.id} name={p.name} actions={actions} />,
+                  <ProjectActions connection={connection} projectID={p.id} name={p.name} actions={actions} />,
                 )}
               </Fragment>
             ))}

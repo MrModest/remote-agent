@@ -1,4 +1,4 @@
-import { Ellipsis, Hand, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
+import { Ellipsis, FolderMinus, Hand, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { Session } from "../protocol/models";
 import { useObserved, useObservedAll } from "../store/observable";
@@ -97,7 +97,9 @@ export function NewSessionButton({ onNew, collection }: { onNew: (c: ServerConne
   const connections = store.servers.map((s) => store.connection(s));
   useObservedAll(connections);
   const connected = connections.filter((c) => c.state.kind === "connected");
-  const projectOn = (c: ServerConnection) => (collection?.kind === "project" && collection.serverID === c.server.id ? collection.projectID : undefined);
+  // Its server alone, if the project was forgotten while chosen.
+  const projectOn = (c: ServerConnection) =>
+    collection?.kind === "project" && collection.serverID === c.server.id && c.projects.has(collection.projectID) ? collection.projectID : undefined;
   const projectName = (c: ServerConnection) => c.projects.get(projectOn(c) ?? "")?.name;
   if (connected.length > 1) {
     const inProject = connected.find(projectName);
@@ -124,19 +126,34 @@ export function NewSessionButton({ onNew, collection }: { onNew: (c: ServerConne
   );
 }
 
-/** A project's +, beside its row: a new session in it. On hover it takes
- *  the place of the row's count (`row-plus-count`). */
-export function ProjectPlus({ connection, projectID, name, actions }: { connection: ServerConnection; projectID: string; name: string; actions: ServerActions }) {
+/** A project's + and ⋯, beside its row: a new session in it, and its
+ *  actions, which forget it too. On hover they take the place of the row's
+ *  count (`row-plus-count`). */
+export function ProjectActions({ connection, projectID, name, actions }: { connection: ServerConnection; projectID: string; name: string; actions: ServerActions }) {
   if (connection.state.kind !== "connected") return null;
+  // The server keeps a project while it has sessions that aren't archived.
+  const hasSessions = connection.activeSessions.some((s) => s.projectId === projectID);
   return (
-    <button
-      className="icon-button row-plus"
-      onClick={() => actions.newSession(connection, projectID)}
-      title={`New session in ${name}`}
-      aria-label={`New session in ${name}`}
-    >
-      <Plus size={15} />
-    </button>
+    <>
+      <button
+        className="icon-button row-plus"
+        onClick={() => actions.newSession(connection, projectID)}
+        title={`New session in ${name}`}
+        aria-label={`New session in ${name}`}
+      >
+        <Plus size={15} />
+      </button>
+      <Menu
+        className="icon-button row-plus"
+        title={`${name} actions`}
+        label={<Ellipsis size={15} />}
+        entries={[
+          { label: `New session in ${name}`, icon: SquarePen, onSelect: () => actions.newSession(connection, projectID) },
+          "divider",
+          { label: "Forget project", icon: FolderMinus, disabled: hasSessions, onSelect: () => connection.removeProject(projectID).catch(() => {}) },
+        ]}
+      />
+    </>
   );
 }
 

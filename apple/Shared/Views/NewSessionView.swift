@@ -21,6 +21,8 @@ struct NewSessionView: View {
     @State private var prompt = ""
     @State private var creating = false
     @State private var error: String?
+    /// Why the chosen project wasn't forgotten, beside its Forget button.
+    @State private var forgetError: String?
     @State private var browsing = false
     @State private var attachments = Attachments()
     @FocusState private var promptFocused: Bool
@@ -52,7 +54,20 @@ struct NewSessionView: View {
                             Label("Add a folder…", systemImage: "folder.badge.plus")
                         }
                         if let project {
-                            Text(project.path).scaledFont(.caption, design: .monospaced).foregroundStyle(.secondary)
+                            HStack {
+                                Text(project.path).scaledFont(.caption, design: .monospaced).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Forget") { Task { await forget(project) } }
+                                    .buttonStyle(.borderless)
+                                    .scaledFont(.callout)
+                                    .help("Take \(project.name) off the list of projects. The folder stays.")
+                                    .accessibilityLabel("Forget \(project.name)")
+                            }
+                            if let forgetError {
+                                Label(forgetError, systemImage: "exclamationmark.triangle")
+                                    .scaledFont(.caption)
+                                    .foregroundStyle(Palette.red)
+                            }
                         }
                     } header: {
                         Text("Project").formHeaderFont()
@@ -217,11 +232,24 @@ struct NewSessionView: View {
             }
             // Initially too, for a project given at the start.
             .onChange(of: projectID, initial: true) { _, id in
+                forgetError = nil
                 useWorktree = false
                 branches = []
                 guard project?.isGitRepo == true else { return }
                 Task { branches = (try? await connection.branches(projectID: id).branches) ?? [] }
             }
+        }
+    }
+
+    /// Takes the project off the server's list, which it refuses while the
+    /// project has sessions that aren't archived.
+    private func forget(_ project: Project) async {
+        forgetError = nil
+        do {
+            try await connection.removeProject(project.id)
+            if projectID == project.id { projectID = "" }
+        } catch {
+            forgetError = error.localizedDescription
         }
     }
 

@@ -74,6 +74,16 @@ fun ServerSplitView(
         }
     }
 
+    // The Columns layout's project is no longer on the server, as when it was
+    // forgotten, here or on another device, so All Sessions shows instead.
+    // Only the synced index can tell.
+    val projectGone = (collection as? SessionCollection.Project)?.let { p ->
+        servers.firstOrNull { it.id == p.serverId }?.let { it.indexSynced && p.projectId !in it.projects }
+    } == true
+    LaunchedEffect(projectGone) {
+        if (projectGone) settings.put(Keys.sessionCollection, SessionCollection.All.stored)
+    }
+
     CompositionLocalProvider(LocalSessionActions provides actions) {
         when (layout) {
             SidebarLayout.COLUMNS -> ColumnsSidebar(

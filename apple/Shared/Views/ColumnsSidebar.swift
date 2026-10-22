@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The Columns layout's sidebar, as Mail's: the collections a session can be
 /// in. What needs you, what is working and every session, then each server's
-/// projects that have sessions, then the archive. The sessions are a column of
+/// projects, then the archive. The sessions are a column of
 /// their own beside it (`SessionListColumn`), which keeps the sidebar to two
 /// levels, as the HIG asks.
 struct CollectionsSidebar: View {
@@ -67,7 +67,8 @@ struct CollectionsSidebar: View {
             .scaledFont(.body)
             .environment(\.backgroundProminence, .standard)
         }
-        .badge(count)
+        // A project shows that it has none; the others, as Mail's, nothing.
+        .badge(count > 0 || c.isProject ? Text(count, format: .number) : nil)
         // On the Mac a badge hides the link's value from the list, which then
         // selects nothing when the row is clicked; the tag gives the value back.
         .tag(c)
@@ -77,10 +78,10 @@ struct CollectionsSidebar: View {
         .listRowBackground(SidebarSelection(selected: collection == c))
     }
 
-    /// The server's projects that have sessions, by name, with how many.
+    /// The server's projects by name, with how many sessions each has.
     private func projects(_ c: ServerConnection) -> [(project: Project, count: Int)] {
         let counts = Dictionary(grouping: c.activeSessions, by: \.projectId).mapValues(\.count)
-        return c.sortedProjects.compactMap { p in counts[p.id].map { (p, $0) } }
+        return c.sortedProjects.map { p in (p, counts[p.id] ?? 0) }
     }
 }
 

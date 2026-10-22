@@ -374,7 +374,8 @@ struct ServerMenuItems: View {
     }
 }
 
-/// A project's actions, for its context menu in the sidebar: a new session in it.
+/// A project's actions, for its context menu in the sidebar: a new session
+/// in it, and forgetting it.
 struct ProjectMenuItems: View {
     let connection: ServerConnection
     let projectID: String
@@ -383,6 +384,12 @@ struct ProjectMenuItems: View {
     var body: some View {
         Button("New Session", systemImage: "plus") { actions.newSession(connection, projectID: projectID) }
             .disabled(connection.state != .connected)
+        Divider()
+        // The server keeps a project while it has sessions that aren't archived.
+        Button("Forget Project", systemImage: "folder.badge.minus") {
+            Task { try? await connection.removeProject(projectID) }
+        }
+        .disabled(connection.state != .connected || connection.activeSessions.contains { $0.projectId == projectID })
     }
 }
 

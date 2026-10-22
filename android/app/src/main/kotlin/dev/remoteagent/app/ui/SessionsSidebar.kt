@@ -107,7 +107,8 @@ fun NewSessionButton(servers: List<ServerState>, collection: SessionCollection? 
     val actions = LocalSessionActions.current
     val connected = servers.filter { it.state == ConnectionState.Connected }
     var menu by remember { mutableStateOf(false) }
-    fun projectOn(s: ServerState) = (collection as? SessionCollection.Project)?.takeIf { it.serverId == s.id }?.projectId
+    // Its server alone, if the project was forgotten while chosen.
+    fun projectOn(s: ServerState) = (collection as? SessionCollection.Project)?.takeIf { it.serverId == s.id && it.projectId in s.projects }?.projectId
     Box {
         IconButton(
             { if (connected.size == 1) actions.newSession(connected[0].connection, projectOn(connected[0])) else menu = true },
@@ -287,14 +288,21 @@ fun ServerHeader(s: ServerState, expanded: Boolean, onExpand: (Boolean) -> Unit,
     }
 }
 
-/** A project's actions, for the menu a long press on its row opens: a new session in it. */
+/** A project's actions, for the menu a long press on its row opens: a new session in it, and forgetting it. */
 @Composable
 fun ProjectMenu(expanded: Boolean, onDismiss: () -> Unit, s: ServerState, projectId: String) {
     val actions = LocalSessionActions.current
+    val connected = s.state == ConnectionState.Connected
     DropdownMenu(expanded, onDismiss, containerColor = palette.mantle) {
-        MenuItem("New session", Icons.add, enabled = s.state == ConnectionState.Connected) {
+        MenuItem("New session", Icons.add, enabled = connected) {
             onDismiss()
             actions.newSession(s.connection, projectId)
+        }
+        HorizontalDivider(color = palette.surface0)
+        // The server keeps a project while it has sessions that aren't archived.
+        MenuItem("Forget project", Icons.forget, enabled = connected && s.active.none { it.projectId == projectId }) {
+            onDismiss()
+            s.connection.scope.launch { runCatching { s.connection.removeProject(projectId) } }
         }
     }
 }

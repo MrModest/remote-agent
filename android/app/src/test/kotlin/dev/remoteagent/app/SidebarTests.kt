@@ -104,7 +104,14 @@ class SidebarTests {
         assertEquals(listOf("error", "running"), groups[0].items.ids())
         assertEquals(listOf("approval", "idle", "background"), groups[1].items.ids())
         // A project the index doesn't have yet.
-        assertEquals("Project", projectGroups(server("c", session("x", 1, project = "gone"))).single().name)
+        assertEquals("Project", projectGroups(server("c", session("x", 1, project = "gone"), projects = emptyList())).single().name)
+    }
+
+    @Test
+    fun projectsWithoutSessionsComeLastByName() {
+        val groups = projectGroups(server("d", session("x", 1, project = "p2"), projects = listOf("p3", "p2", "p1")))
+        assertEquals(listOf("p2", "p1", "p3"), groups.map { it.projectId })
+        assertEquals(listOf(listOf("x"), emptyList(), emptyList()), groups.map { it.items.ids() })
     }
 
     @Test

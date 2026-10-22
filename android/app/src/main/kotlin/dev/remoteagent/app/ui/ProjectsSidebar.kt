@@ -37,7 +37,8 @@ import dev.remoteagent.app.platform.state
 /**
  * The Projects layout: each server a section, its projects folding open to
  * their sessions, a line each, what needs you first. The projects come in
- * order of their latest session; a server's archived sessions fold up last.
+ * order of their latest session, those without any by name after them; a
+ * server's archived sessions fold up last.
  * Mirrors apple/Shared/Views/ProjectsSidebar.swift.
  */
 @Composable
@@ -115,8 +116,8 @@ fun ProjectsSidebar(servers: List<ServerState>, selection: SessionKey?, onOpenSe
 
 /**
  * A project in the Projects layout: its name and how many sessions it has;
- * while folded shut, whether one needs you. A tap folds it open or shut, and
- * a long press opens its menu.
+ * while folded shut, whether one needs you. A tap folds it open or shut,
+ * unless it has no sessions to show, and a long press opens its menu.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -125,9 +126,10 @@ private fun ProjectLabel(
     modifier: Modifier = Modifier,
 ) {
     val angle by animateFloatAsState(if (shown) 90f else 0f, label = "chevron")
+    val folds = count > 0
     SidebarRow(
-        modifier.combinedClickable(onClick = { onToggle(!shown) }, onLongClick = onLongClick, onLongClickLabel = "Actions")
-            .semantics { stateDescription = if (shown) "Expanded" else "Collapsed" },
+        modifier.combinedClickable(onClick = { if (folds) onToggle(!shown) }, onLongClick = onLongClick, onLongClickLabel = "Actions")
+            .semantics { if (folds) stateDescription = if (shown) "Expanded" else "Collapsed" },
     ) {
         Icon(painterResource(Icons.folder), null, Modifier.size(16.dp), tint = palette.accent)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -138,6 +140,6 @@ private fun ProjectLabel(
             if (waiting) Icon(painterResource(Icons.approval), "Needs you", Modifier.size(13.dp), tint = palette.yellow)
         }
         Text("$count", style = Type.caption.copy(fontFeatureSettings = "tnum"), color = palette.overlay)
-        Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
+        if (folds) Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
     }
 }

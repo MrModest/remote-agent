@@ -69,7 +69,7 @@ fun ColumnsSidebar(
 
 /**
  * The Columns layout's sidebar: what needs you, what is working and every
- * session, then each server's projects that have sessions, then the archive.
+ * session, then each server's projects, then the archive.
  * The sessions are a column of their own beside it, which keeps the sidebar
  * to two levels.
  */
@@ -91,7 +91,10 @@ private fun CollectionsSidebar(
     fun Link(
         c: SessionCollection, title: String, @DrawableRes icon: Int, count: Int, tint: Color = palette.accent,
         modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null,
-    ) = CollectionRow(title, icon, count, tint, selected = c == collection, onClick = { onChoose(c) }, modifier = modifier, onLongClick = onLongClick)
+    ) = CollectionRow(
+        title, icon, count, tint, selected = c == collection, onClick = { onChoose(c) }, modifier = modifier, onLongClick = onLongClick,
+        showsZero = c is SessionCollection.Project,
+    )
 
     Box(modifier) {
         Screen(
@@ -148,6 +151,7 @@ private fun CollectionRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
+    showsZero: Boolean = false,
 ) {
     Box(modifier.fillMaxWidth().background(palette.mantle).padding(horizontal = 8.dp)) {
         Row(
@@ -162,16 +166,16 @@ private fun CollectionRow(
         ) {
             Icon(painterResource(icon), null, Modifier.size(20.dp), tint = tint)
             Text(title, style = Type.body, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            // As a list's badge, which shows nothing for none.
-            if (count > 0) Text("$count", style = Type.body.copy(fontFeatureSettings = "tnum"), color = palette.subtext)
+            // As a list's badge, which shows nothing for none, but a project's shows it has none.
+            if (count > 0 || showsZero) Text("$count", style = Type.body.copy(fontFeatureSettings = "tnum"), color = palette.subtext)
         }
     }
 }
 
-/** The server's projects that have sessions, by name, with how many. */
+/** The server's projects by name, with how many sessions each has. */
 private fun collectionProjects(s: ServerState): List<Pair<Project, Int>> {
     val counts = s.active.groupingBy { it.projectId }.eachCount()
-    return s.projects.sortedProjects.mapNotNull { p -> counts[p.id]?.let { p to it } }
+    return s.projects.sortedProjects.map { p -> p to (counts[p.id] ?: 0) }
 }
 
 /**

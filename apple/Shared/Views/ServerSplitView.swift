@@ -49,6 +49,15 @@ struct ServerSplitView: View {
         return connection.indexSynced && connection.sessions[route.sessionID] == nil
     }
 
+    /// The Columns layout's project is no longer on the server, as when it was
+    /// forgotten, here or on another device. Only the synced index can tell.
+    private var collectionProjectGone: Bool {
+        guard case .project(let serverID, let projectID) = collection.wrappedValue,
+              let server = store.servers.first(where: { $0.id == serverID }) else { return false }
+        let c = store.connection(for: server)
+        return c.indexSynced && c.projects[projectID] == nil
+    }
+
     /// Where a new session starts from the menu bar, as with the New Session
     /// button: in the Columns layout's project, else on the open session's
     /// server, else on the first one connected.
@@ -92,6 +101,9 @@ struct ServerSplitView: View {
                 if gone { openSession = "" }
             }
             .onChange(of: revealKey, initial: true) { _, _ in reveal() }
+            .onChange(of: collectionProjectGone, initial: true) { _, gone in
+                if gone { collection.wrappedValue = .all }
+            }
             #if os(macOS)
             .onChange(of: route, initial: true) { _, route in notifier.shown = route }
             .onChange(of: notifier.opened, initial: true) { _, route in

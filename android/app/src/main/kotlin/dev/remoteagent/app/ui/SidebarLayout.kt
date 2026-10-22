@@ -14,6 +14,7 @@ import dev.remoteagent.core.store.SavedServer
 import dev.remoteagent.core.store.ServerConnection
 import dev.remoteagent.core.store.activeSessions
 import dev.remoteagent.core.store.archivedSessions
+import dev.remoteagent.core.store.sortedProjects
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -132,15 +133,18 @@ fun inboxGroups(active: List<ServerSession>): InboxGroups {
 class ProjectGroup(val projectId: String, val name: String, val items: List<ServerSession>)
 
 /**
- * The server's projects with sessions, the one worked in last first; in
- * each, what needs you, then the latest.
+ * The server's projects: those with sessions, the one worked in last first,
+ * then the others by name. In each, what needs you, then the latest.
  */
-fun projectGroups(server: ServerState): List<ProjectGroup> =
+fun projectGroups(server: ServerState): List<ProjectGroup> {
     // groupBy keeps the order each project first appears in: its latest session's.
-    server.active.groupBy { it.projectId }.map { (id, sessions) ->
+    val worked = server.active.groupBy { it.projectId }.map { (id, sessions) ->
         val items = sessions.map { ServerSession(server, it) }
         ProjectGroup(id, server.projects[id]?.name ?: "Project", items.filter { it.session.needsYou } + items.filter { !it.session.needsYou })
     }
+    val ids = worked.map { it.projectId }.toSet()
+    return worked + server.projects.sortedProjects.filter { it.id !in ids }.map { ProjectGroup(it.id, it.name, emptyList()) }
+}
 
 /** Ids separated by spaces, as the sidebars keep what they hide: [id] added or taken out. */
 fun toggled(stored: String, id: String, present: Boolean): String {

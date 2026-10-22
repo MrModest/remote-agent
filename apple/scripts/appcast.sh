@@ -7,15 +7,28 @@
 #   SPARKLE_PRIVATE_KEY=… appcast.sh <app> <zip> <zip url> <release page url> [notes.md] > appcast.xml
 #
 # sign_update comes with the Sparkle package, which xcodebuild resolves into
-# build/SourcePackages; SIGN_UPDATE names another copy.
+# build/SourcePackages or build/DerivedData/SourcePackages, and swift build
+# into .build/artifacts; SIGN_UPDATE names another copy.
 set -eu
 
 app=$1 zip=$2 url=$3 page=$4 notes=${5:-}
-here=$(cd "$(dirname "$0")" && pwd)
-sign_update=${SIGN_UPDATE:-$here/../build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update}
+root=$(cd "$(dirname "$0")/.." && pwd)
+sign_update=${SIGN_UPDATE:-}
+if [ -z "$sign_update" ]; then
+	for artifacts in "$root/build/SourcePackages/artifacts" "$root/build/DerivedData/SourcePackages/artifacts" "$root/.build/artifacts"; do
+		if [ -x "$artifacts/sparkle/Sparkle/bin/sign_update" ]; then
+			sign_update=$artifacts/sparkle/Sparkle/bin/sign_update
+			break
+		fi
+	done
+fi
+if [ -z "$sign_update" ]; then
+	echo "error: no sign_update; build the app first, or set SIGN_UPDATE" >&2
+	exit 1
+fi
 
 info="$app/Contents/Info.plist"
-name=$(plutil -extract CFBundleDisplayName raw "$info")
+name=$(plutil -extract CFBundleDisplayName raw "$info" 2>/dev/null || plutil -extract CFBundleName raw "$info")
 version=$(plutil -extract CFBundleShortVersionString raw "$info")
 build=$(plutil -extract CFBundleVersion raw "$info")
 minimum=$(plutil -extract LSMinimumSystemVersion raw "$info")
@@ -33,7 +46,7 @@ print(publicKey?.base64EncodedString() ?? "")
 SWIFT
 )
 if [ "$public" != "$(plutil -extract SUPublicEDKey raw "$info")" ]; then
-	echo "error: $app's SUPublicEDKey isn't the public half of SPARKLE_PRIVATE_KEY ($public); set SPARKLE_PUBLIC_KEY in project.yml" >&2
+	echo "error: $app's SUPublicEDKey isn't the public half of SPARKLE_PRIVATE_KEY ($public)" >&2
 	exit 1
 fi
 

@@ -377,6 +377,7 @@ To exercise the UI without spending tokens, run `rad serve --fake` and pick **Fa
 - `fail`: makes the turn fail
 - `screenshot`: runs a tool that returns an image
 - `picture`: writes `picture-<turn>.png` in the working directory and shows it in the reply, as agents are told to
+- `markdown`: adds Markdown to the reply: a heading, lists, a task list, a code block, a quote and a table
 - `background [duration]`: leaves a task running in the background (5s by default, or for example `background 1m`), then starts a turn of its own to report on it
 - `/compact`: marks the transcript with *Context compacted* and reports less context in use
 

@@ -10,6 +10,7 @@
 //	"screenshot" run a tool that returns an image
 //	"picture"  write picture-<turn>.png in the cwd and show it in the reply,
 //	           as a Markdown image with its path, as agents are told to
+//	"markdown" reply with Markdown: lists, a code block, a quote and a table
 //	"background [duration]" leave a task running in the background (5s by
 //	           default), then start a turn of its own to report on it
 //
@@ -260,6 +261,9 @@ func (r *runtime) turn(ctx context.Context, n int, text string, images int) {
 		msg.Text += w
 		r.emit(harness.ItemEvent{Item: msg})
 	}
+	if strings.Contains(text, "markdown") {
+		msg.Text += "\n\n" + sampleMarkdown
+	}
 	if strings.Contains(text, "picture") {
 		path := filepath.Join(r.opts.Cwd, fmt.Sprintf("picture-%d.png", n))
 		if err := os.WriteFile(path, screenshot(n), 0o644); err == nil {
@@ -270,6 +274,32 @@ func (r *runtime) turn(ctx context.Context, n int, text string, images int) {
 	r.emit(harness.ItemEvent{Item: msg})
 	end(model.TurnCompleted, "")
 }
+
+// sampleMarkdown is the reply to "markdown": the blocks the apps draw.
+const sampleMarkdown = `## A heading
+
+A paragraph with ` + "`inline code`" + `, **bold** and a [link](https://example.com).
+
+1. First item
+2. Second item
+   - A nested bullet
+   - Another one
+3. Third item
+
+- [x] A task done
+- [ ] A task to do
+
+` + "```swift" + `
+let answer = 42
+print("The answer is \(answer)")
+` + "```" + `
+
+> A quote.
+
+| Name | Value |
+| --- | --- |
+| one | 1 |
+| two | 2 |`
 
 // background runs t for d, then, once no turn runs, starts a turn of its own
 // to report on it, as Claude does.

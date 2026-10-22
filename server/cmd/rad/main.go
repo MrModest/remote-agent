@@ -9,6 +9,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -50,9 +52,24 @@ Usage:
   rad version
 `
 
+// printUsage prints the usage, then where this rad's config and data are, as
+// RAD_HOME and the XDG variables place them.
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, usage)
+	configPath, dataDir, err := config.Paths()
+	if err != nil {
+		return
+	}
+	note := ""
+	if _, err := os.Stat(configPath); errors.Is(err, fs.ErrNotExist) {
+		note = " (not written yet: rad writes the default on first use)"
+	}
+	fmt.Fprintf(w, "\nFiles (RAD_HOME=<dir> puts both in <dir>):\n  config  %s%s\n  data    %s\n", configPath, note, dataDir)
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+		printUsage(os.Stderr)
 		os.Exit(2)
 	}
 	var err error
@@ -74,9 +91,9 @@ func main() {
 	case "version", "--version", "-v":
 		fmt.Println("rad", api.Version)
 	case "help", "-h", "--help":
-		fmt.Print(usage)
+		printUsage(os.Stdout)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		printUsage(os.Stderr)
 		os.Exit(2)
 	}
 	if err != nil {

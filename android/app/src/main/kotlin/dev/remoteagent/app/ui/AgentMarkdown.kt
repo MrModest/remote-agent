@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,16 +22,23 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.compose.LocalBulletListHandler
+import com.mikepenz.markdown.compose.LocalOrderedListHandler
+import com.mikepenz.markdown.compose.components.CurrentComponentsBridge
+import com.mikepenz.markdown.compose.components.MarkdownComponentModel
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
+import com.mikepenz.markdown.compose.elements.MarkdownListItems
 import com.mikepenz.markdown.compose.elements.MarkdownParagraph
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
 import com.mikepenz.markdown.compose.elements.MarkdownTableRow
+import com.mikepenz.markdown.compose.elements.listDepth
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.BulletHandler
 import com.mikepenz.markdown.model.ImageData
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.markdownAnnotator
@@ -41,6 +49,7 @@ import com.mikepenz.markdown.utils.getUnescapedTextInNode
 import com.mikepenz.markdown.utils.resolveImageAlt
 import com.mikepenz.markdown.utils.resolveImageLink
 import dev.remoteagent.core.protocol.ImageRef
+import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.getTextInNode
@@ -101,6 +110,10 @@ fun AgentMarkdown(text: String, modifier: Modifier = Modifier, images: List<Imag
                     },
                 )
             },
+            // A list's markers are left out of a selection, so copying items copies their text alone.
+            orderedList = { ListItems(it, LocalOrderedListHandler.current, MarkdownTokenTypes.LIST_NUMBER, it.typography.ordered) },
+            unorderedList = { ListItems(it, LocalBulletListHandler.current, MarkdownTokenTypes.LIST_BULLET, it.typography.bullet) },
+            checkbox = { DisableSelection { CurrentComponentsBridge.checkbox(it) } },
             codeFence = { CodeFence { style -> MarkdownCodeFence(it.content, it.node, style) { c, _, s -> CodeSnippet(c, s) } } },
             codeBlock = { CodeFence { style -> MarkdownCodeBlock(it.content, it.node, style) { c, _, s -> CodeSnippet(c, s) } } },
             paragraph = { model ->
@@ -134,6 +147,20 @@ fun AgentMarkdown(text: String, modifier: Modifier = Modifier, images: List<Imag
             },
         ),
     )
+}
+
+/**
+ * A list as the library draws it, but with markers ("1.", "•") that can't be
+ * selected: the library's would be copied with the items around them.
+ */
+@Composable
+private fun ListItems(model: MarkdownComponentModel, handler: BulletHandler, type: IElementType, style: TextStyle) {
+    val depth = model.listDepth
+    MarkdownListItems(model.content, model.node, depth) { index, listNumber, marker ->
+        DisableSelection {
+            Text(handler.transform(type, marker?.getUnescapedTextInNode(model.content), index, listNumber, depth), style = style)
+        }
+    }
 }
 
 @Composable

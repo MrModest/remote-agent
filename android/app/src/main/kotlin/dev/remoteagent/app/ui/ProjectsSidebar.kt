@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.remoteagent.app.platform.AppSettings.Keys
 import dev.remoteagent.app.platform.state
+import dev.remoteagent.core.protocol.Session
 
 /**
  * The Projects layout: each server a section, its projects folding open to
@@ -91,7 +92,7 @@ fun ProjectsSidebar(servers: List<ServerState>, selection: SessionKey?, onOpenSe
                     var menu by remember { mutableStateOf(false) }
                     Box(Modifier.animateItem()) {
                         ProjectLabel(
-                            group.name, group.items.size, waiting = !shown && group.items.any { it.session.needsYou }, shown = shown,
+                            group.name, group.items.size, status = group.items.map { it.session }.mostPressing(), shown = shown,
                             onToggle = { setProjectExpanded(s.id, group.projectId, it) }, onLongClick = { menu = true },
                         )
                         ProjectMenu(menu, { menu = false }, s, group.projectId)
@@ -115,14 +116,14 @@ fun ProjectsSidebar(servers: List<ServerState>, selection: SessionKey?, onOpenSe
 }
 
 /**
- * A project in the Projects layout: its name and how many sessions it has;
- * while folded shut, whether one needs you. A tap folds it open or shut,
- * unless it has no sessions to show, and a long press opens its menu.
+ * A project in the Projects layout: its name, the state of its session that
+ * asks most for a look, and how many sessions it has. A tap folds it open or
+ * shut, unless it has no sessions to show, and a long press opens its menu.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProjectLabel(
-    name: String, count: Int, waiting: Boolean, shown: Boolean, onToggle: (Boolean) -> Unit, onLongClick: () -> Unit,
+    name: String, count: Int, status: Session?, shown: Boolean, onToggle: (Boolean) -> Unit, onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val angle by animateFloatAsState(if (shown) 90f else 0f, label = "chevron")
@@ -137,7 +138,7 @@ private fun ProjectLabel(
                 name, style = Type.body.copy(fontWeight = FontWeight.Medium), color = palette.text,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
-            if (waiting) Icon(painterResource(Icons.approval), "Needs you", Modifier.size(13.dp), tint = palette.yellow)
+            if (status != null) StatusGlyph(status)
         }
         Text("$count", style = Type.caption.copy(fontFeatureSettings = "tnum"), color = palette.overlay)
         if (folds) Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)

@@ -88,6 +88,27 @@ extension Session {
     var needsYou: Bool { status == .awaitingApproval || status == .error }
     /// Working, or done but with tasks left running in the background.
     var isBusy: Bool { status == .running || (status == .idle && backgroundTasks?.isEmpty == false) }
+
+    /// How much the session asks for a look: an answer it waits for, then a
+    /// failure, then work, then work left in the background. Idle and stopped
+    /// sessions ask nothing.
+    var urgency: Int {
+        switch status {
+        case .awaitingApproval: 4
+        case .error: 3
+        case .running: 2
+        case .idle where backgroundTasks?.isEmpty == false: 1
+        default: 0
+        }
+    }
+}
+
+extension Sequence<Session> {
+    /// The session whose state a project's row shows for all of them: the
+    /// one that asks most, if any does.
+    var mostPressing: Session? {
+        filter { $0.urgency > 0 }.max { $0.urgency < $1.urgency }
+    }
 }
 
 extension ServerStore {

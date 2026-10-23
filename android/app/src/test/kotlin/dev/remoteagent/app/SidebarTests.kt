@@ -6,6 +6,7 @@ import dev.remoteagent.app.ui.SessionCollection
 import dev.remoteagent.app.ui.SessionKey
 import dev.remoteagent.app.ui.SidebarLayout
 import dev.remoteagent.app.ui.inboxGroups
+import dev.remoteagent.app.ui.mostPressing
 import dev.remoteagent.app.ui.projectGroups
 import dev.remoteagent.app.ui.sessionActivity
 import dev.remoteagent.app.ui.sessions
@@ -112,6 +113,17 @@ class SidebarTests {
         val groups = projectGroups(server("d", session("x", 1, project = "p2"), projects = listOf("p3", "p2", "p1")))
         assertEquals(listOf("p2", "p1", "p3"), groups.map { it.projectId })
         assertEquals(listOf(listOf("x"), emptyList(), emptyList()), groups.map { it.items.ids() })
+    }
+
+    @Test
+    fun projectsShowTheirMostPressingSession() {
+        val a = projectGroups(servers[0]).associate { it.projectId to it.items.map { i -> i.session }.mostPressing()?.id }
+        assertEquals(mapOf("p2" to "error", "p1" to "approval"), a)
+        // Stopped and idle sessions ask nothing.
+        assertEquals(listOf(null, null), projectGroups(servers[1]).map { g -> g.items.map { it.session }.mostPressing() })
+        assertEquals("run", listOf(session("bg", 1, background = true), session("run", 2, SessionStatus.RUNNING)).mostPressing()?.id)
+        assertEquals("bg", listOf(session("idle", 1), session("bg", 2, background = true)).mostPressing()?.id)
+        assertNull(emptyList<Session>().mostPressing())
     }
 
     @Test

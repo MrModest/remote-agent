@@ -110,6 +110,23 @@ val Session.needsYou: Boolean
 val Session.isBusy: Boolean
     get() = status == SessionStatus.RUNNING || (status == SessionStatus.IDLE && backgroundTasks.isNotEmpty())
 
+/**
+ * How much the session asks for a look: an answer it waits for, then a
+ * failure, then work, then work left in the background. Idle and stopped
+ * sessions ask nothing.
+ */
+val Session.urgency: Int
+    get() = when (status) {
+        SessionStatus.AWAITING_APPROVAL -> 4
+        SessionStatus.ERROR -> 3
+        SessionStatus.RUNNING -> 2
+        SessionStatus.IDLE -> if (backgroundTasks.isNotEmpty()) 1 else 0
+        else -> 0
+    }
+
+/** The session whose state a project's row shows for all of them: the one that asks most, if any does. */
+fun List<Session>.mostPressing(): Session? = filter { it.urgency > 0 }.maxByOrNull { it.urgency }
+
 /** Every server's sessions, the latest first. */
 fun List<ServerState>.sessions(archived: Boolean): List<ServerSession> =
     flatMap { s -> (if (archived) s.archived else s.active).map { ServerSession(s, it) } }

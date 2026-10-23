@@ -1,5 +1,6 @@
 import { Archive, CircleCheck, CirclePlay, Folder, Hand, Inbox, MessagesSquare, type LucideIcon } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import type { Session } from "../protocol/models";
 import { useObserved, useObservedAll } from "../store/observable";
 import type { ServerConnection } from "../store/serverConnection";
 import { useServerStore } from "./context";
@@ -11,12 +12,13 @@ import {
   collectionSessions,
   collectionTitle,
   isBusy,
+  mostPressing,
   needsYou,
   sameCollection,
   sessionKey,
   type SessionCollection,
 } from "./sidebarLayout";
-import { SessionLink, SessionListRow } from "./SidebarRows";
+import { SessionLink, SessionListRow, StatusGlyph } from "./SidebarRows";
 
 /** The Columns layout's sidebar, as Mail's: the collections a session can
  *  be in. What needs you, what is working and every session, then each
@@ -39,13 +41,16 @@ export function CollectionsSidebar({
   const active = allSessions(store, false);
   const archived = allSessions(store, true);
 
-  const link = (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint = "c-accent", plus?: ReactNode) => {
+  const link = (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint = "c-accent", plus?: ReactNode, status?: Session) => {
     const selected = sameCollection(c, collection);
     return (
       <li className={plus ? "row-plus-host" : undefined}>
         <button className={"collection-row" + (selected ? " selected" : "")} onClick={() => setCollection(c)} aria-current={selected ? "page" : undefined}>
           <Icon size={15} strokeWidth={2} className={tint} />
           <span className="collection-row-name">{title}</span>
+          {/* A project's: the state of its session that asks most for a look. */}
+          {status && <StatusGlyph session={status} />}
+          <span className="spacer" />
           {/* A project shows that it has none; the others, as Mail's, nothing. */}
           {(count > 0 || c.kind === "project") && <span className="c-overlay small row-plus-count">{count}</span>}
         </button>
@@ -91,12 +96,16 @@ function ServerCollections({
   connection: ServerConnection;
   expanded: boolean;
   setExpanded: (shown: boolean) => void;
-  link: (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint?: string, plus?: ReactNode) => ReactNode;
+  link: (c: SessionCollection, title: string, Icon: LucideIcon, count: number, tint?: string, plus?: ReactNode, status?: Session) => ReactNode;
   actions: ServerActions;
 }) {
   useObserved(connection);
-  const counts = new Map<string, number>();
-  for (const s of connection.activeSessions) counts.set(s.projectId, (counts.get(s.projectId) ?? 0) + 1);
+  const byProject = new Map<string, Session[]>();
+  for (const s of connection.activeSessions) {
+    const list = byProject.get(s.projectId) ?? [];
+    list.push(s);
+    byProject.set(s.projectId, list);
+  }
   return (
     <section className="server-section" aria-label={connection.server.name}>
       <ServerHeader connection={connection} expanded={expanded} setExpanded={setExpanded} actions={actions} />
@@ -104,18 +113,22 @@ function ServerCollections({
         <>
           <ConnectionStatus connection={connection} onNew={() => actions.newSession(connection)} />
           <ul className="session-list">
-            {connection.sortedProjects.map((p) => (
-              <Fragment key={p.id}>
-                {link(
-                  { kind: "project", serverID: connection.server.id, projectID: p.id },
-                  p.name,
-                  Folder,
-                  counts.get(p.id) ?? 0,
-                  undefined,
-                  <ProjectActions connection={connection} projectID={p.id} name={p.name} actions={actions} />,
-                )}
-              </Fragment>
-            ))}
+            {connection.sortedProjects.map((p) => {
+              const sessions = byProject.get(p.id) ?? [];
+              return (
+                <Fragment key={p.id}>
+                  {link(
+                    { kind: "project", serverID: connection.server.id, projectID: p.id },
+                    p.name,
+                    Folder,
+                    sessions.length,
+                    undefined,
+                    <ProjectActions connection={connection} projectID={p.id} name={p.name} actions={actions} />,
+                    mostPressing(sessions),
+                  )}
+                </Fragment>
+              );
+            })}
           </ul>
         </>
       )}

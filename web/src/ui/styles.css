@@ -524,7 +524,9 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
 .session-row.three-line .session-row-main { gap: 8px; padding: 6px 8px; }
 .session-row.three-line .session-row-main { padding: 8px; }
 .session-row.tree .session-row-main { align-items: center; gap: 8px; padding: 4px 8px 4px 30px; }
-.session-row.tree .status-glyph { margin-top: 0; }
+.session-row.tree .status-glyph,
+.project-row .status-glyph,
+.collection-row .status-glyph { margin-top: 0; }
 .row-line {
   display: flex;
   align-items: baseline;
@@ -627,7 +629,6 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.collection-row-name { flex: 1; }
 /* A project's row and its + and ⋯, which on hover take the count's place,
    and stay while the menu is open. */
 .row-plus-host { display: flex; align-items: center; }

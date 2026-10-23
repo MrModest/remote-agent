@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "../protocol/models";
-import { isBusy, needsYou, parseCollection, shortAge, storedCollection, type SessionCollection } from "./sidebarLayout";
+import { isBusy, mostPressing, needsYou, parseCollection, shortAge, storedCollection, type SessionCollection } from "./sidebarLayout";
 
 const session = (patch: Partial<Session>): Session => ({
   id: "s",
@@ -38,6 +38,20 @@ describe("sidebar layouts", () => {
     expect(isBusy(session({ backgroundTasks: [{ id: "b", kind: "command", description: "watch" }] }))).toBe(true);
     expect(isBusy(session({}))).toBe(false);
     expect(isBusy(session({ status: "stopped", backgroundTasks: [{ id: "b", kind: "command", description: "watch" }] }))).toBe(false);
+  });
+
+  it("shows a project's most pressing session", () => {
+    const background = session({ id: "background", backgroundTasks: [{ id: "b", kind: "command", description: "watch" }] });
+    const running = session({ id: "running", status: "running" });
+    const failed = session({ id: "failed", status: "error" });
+    const waiting = session({ id: "waiting", status: "awaiting_approval" });
+    const idle = [session({ id: "idle" }), session({ id: "stopped", status: "stopped" })];
+    expect(mostPressing([])).toBeUndefined();
+    expect(mostPressing(idle)).toBeUndefined();
+    expect(mostPressing([...idle, background])?.id).toBe("background");
+    expect(mostPressing([background, running, ...idle])?.id).toBe("running");
+    expect(mostPressing([running, failed])?.id).toBe("failed");
+    expect(mostPressing([failed, waiting, running])?.id).toBe("waiting");
   });
 
   it("gives short ages", () => {

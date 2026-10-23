@@ -27,7 +27,7 @@ struct ProjectsSidebar: View {
                     ForEach(groups(c), id: \.projectID) { group in
                         let open = projectExpanded(c.server.id, group.projectID)
                         let label = ProjectLabel(name: group.name, count: group.items.count,
-                                                 waiting: !open.wrappedValue && group.items.contains(where: \.session.needsYou))
+                                                 status: group.items.map(\.session).mostPressing)
                             // The whole row, past the name, takes a right-click.
                             .contentShape(Rectangle())
                             .contextMenu { ProjectMenuItems(connection: c, projectID: group.projectID) }
@@ -142,12 +142,12 @@ struct ProjectsSidebar: View {
     }
 }
 
-/// A project in the Projects layout: its name and how many sessions it has;
-/// while folded shut, whether one needs you.
+/// A project in the Projects layout: its name, the state of its session that
+/// asks most for a look, and how many sessions it has.
 private struct ProjectLabel: View {
     let name: String
     let count: Int
-    let waiting: Bool
+    let status: Session?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -157,11 +157,8 @@ private struct ProjectLabel: View {
             Text(name)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
-            if waiting {
-                Image(systemName: "hand.raised.fill")
-                    .scaledFont(.caption)
-                    .foregroundStyle(Palette.yellow)
-                    .accessibilityLabel("Needs you")
+            if let status {
+                StatusGlyph(session: status)
             }
             Spacer(minLength: 4)
             Text("\(count)")

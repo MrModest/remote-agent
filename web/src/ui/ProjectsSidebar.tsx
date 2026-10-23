@@ -1,4 +1,4 @@
-import { Archive, ChevronRight, Folder, Hand } from "lucide-react";
+import { Archive, ChevronRight, Folder } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useObserved } from "../store/observable";
 import type { ServerConnection } from "../store/serverConnection";
@@ -6,8 +6,8 @@ import { storage } from "../store/storage";
 import { useServerStore } from "./context";
 import { navigate, type Route } from "./router";
 import { ConnectionStatus, ProjectActions, ServerHeader, useCollapsed, type ServerActions } from "./SessionsSidebar";
-import { needsYou, needsYouFirst, type ServerSession } from "./sidebarLayout";
-import { SessionLink, TreeRow } from "./SidebarRows";
+import { mostPressing, needsYouFirst, type ServerSession } from "./sidebarLayout";
+import { SessionLink, StatusGlyph, TreeRow } from "./SidebarRows";
 
 /** The Projects layout: each server a section, its projects folding open to
  *  their sessions, a line each, what needs you first. The projects come in
@@ -137,6 +137,7 @@ function ServerProjects({
             const open = !folded.has(key);
             // Without sessions, it has nothing to fold open.
             const empty = g.items.length === 0;
+            const status = mostPressing(g.items.map((i) => i.session));
             return (
               <div key={g.projectID}>
                 <div className="row-plus-host project-row-host">
@@ -144,7 +145,7 @@ function ServerProjects({
                     <ChevronRight size={13} className={"chevron c-overlay" + (open ? " open" : "") + (empty ? " invisible" : "")} />
                     <Folder size={14} className="c-accent" />
                     <span className="project-row-name">{g.name}</span>
-                    {!open && g.items.some((i) => needsYou(i.session)) && <Hand size={12} strokeWidth={2.25} className="c-yellow" aria-label="Needs you" />}
+                    {status && <StatusGlyph session={status} />}
                     <span className="spacer" />
                     <span className="c-overlay small row-plus-count">{g.items.length}</span>
                   </button>

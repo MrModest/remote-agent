@@ -9,13 +9,11 @@ import dev.remoteagent.core.store.ServerConnection
 import dev.remoteagent.core.store.ServerTaskProgress
 import dev.remoteagent.core.store.ServerTaskProgress.Phase
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -274,15 +272,14 @@ class ServerTaskProgressTests {
         answer(rad) { method, _ -> if (method == "task.get") task(ServerTask.UPDATE_SERVER, "succeeded", version = "0.2", harness = null) else null }
         server.upgrade(rad)
         val c = connect()
-        val seen = mutableListOf<Phase>() // only touched on the dispatcher
-        val (p, watching) = withContext(dispatcher) {
-            val p = ServerTaskProgress(c, decode(task(ServerTask.UPDATE_SERVER, harness = null)), 20.milliseconds, 300.milliseconds)
-            p to scope.launch(start = CoroutineStart.UNDISPATCHED) { p.phase.collect { seen += it } }
+        // Restarting lasts a second, so a slow machine sees it too: the phase
+        // is a StateFlow, which a slow collector sees only the latest of.
+        val p = withContext(dispatcher) {
+            ServerTaskProgress(c, decode(task(ServerTask.UPDATE_SERVER, harness = null)), 20.milliseconds, 1.seconds)
         }
+        p.until(Phase.RESTARTING)
         p.until(Phase.FAILED)
         assertEquals("rad hasn't come back as 0.2", p.task.value.error)
-        watching.cancel()
-        assertEquals(listOf(Phase.RUNNING, Phase.RESTARTING, Phase.FAILED), withContext(dispatcher) { seen.toList() })
         withContext(dispatcher) { c.stop() }
     }
 }

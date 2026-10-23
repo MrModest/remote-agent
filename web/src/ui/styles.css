@@ -320,6 +320,7 @@ svg { flex: none; }
 .disclosure-header .chevron { margin-left: auto; }
 .chevron { transition: transform 0.15s; }
 .chevron.open { transform: rotate(90deg); }
+.invisible { visibility: hidden; }
 
 .banner {
   margin: 8px 12px;
@@ -523,7 +524,9 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
 .session-row.three-line .session-row-main { gap: 8px; padding: 6px 8px; }
 .session-row.three-line .session-row-main { padding: 8px; }
 .session-row.tree .session-row-main { align-items: center; gap: 8px; padding: 4px 8px 4px 30px; }
-.session-row.tree .status-glyph { margin-top: 0; }
+.session-row.tree .status-glyph,
+.project-row .status-glyph,
+.collection-row .status-glyph { margin-top: 0; }
 .row-line {
   display: flex;
   align-items: baseline;
@@ -626,7 +629,23 @@ button.sidebar-status:hover { background: color-mix(in srgb, var(--surface0) 50%
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.collection-row-name { flex: 1; }
+/* A project's row and its + and ⋯, which on hover take the count's place,
+   and stay while the menu is open. */
+.row-plus-host { display: flex; align-items: center; }
+.row-plus-host > .collection-row,
+.row-plus-host > .project-row { flex: 1; min-width: 0; }
+.project-row-host { margin: 0 8px; }
+.project-row-host > .project-row { width: auto; margin: 0; }
+.row-plus { display: none; min-width: 26px; height: 26px; color: var(--subtext); }
+.row-plus-host:hover .row-plus,
+.row-plus-host:has(:focus-visible) .row-plus,
+.row-plus-host:has(.row-plus[aria-expanded="true"]) .row-plus { display: inline-flex; }
+.row-plus-host:hover .row-plus-count,
+.row-plus-host:has(:focus-visible) .row-plus-count,
+.row-plus-host:has(.row-plus[aria-expanded="true"]) .row-plus-count { display: none; }
+@media (hover: none) {
+  .row-plus { display: inline-flex; }
+}
 .bar-count {
   font-size: 0.72em;
   font-weight: 400;
@@ -782,6 +801,22 @@ dialog::backdrop {
   text-overflow: ellipsis;
   max-width: 50vw;
 }
+.title-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+.title-stack > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modal-subtitle {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--subtext);
+}
 .modal-bar-side {
   display: flex;
   align-items: center;
@@ -893,6 +928,52 @@ button.form-row:hover:not(:disabled) { background: var(--surface0); }
   flex-direction: column;
   gap: 2px;
 }
+.form-row.stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+.task-row { text-align: left; }
+
+/* Server tasks: an update or a sign-in as it goes */
+.task-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 20px;
+}
+.task-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-input {
+  display: flex;
+  gap: 8px;
+}
+.task-input .text-field {
+  flex: 1;
+  max-width: none;
+  font-family: var(--code-font);
+}
+.task-output {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-field);
+  background: var(--base);
+  font-family: var(--code-font);
+  font-size: 0.86em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 50vh;
+  overflow-y: auto;
+  user-select: text;
+}
+
 .folder-row { text-align: left; }
 .folder-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .chip-tag {

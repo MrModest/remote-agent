@@ -10,6 +10,7 @@ import (
 	"remote-agent/internal/harness"
 	"remote-agent/internal/model"
 	"remote-agent/internal/orchestrator"
+	"remote-agent/internal/tasks"
 )
 
 func decode[T any](raw json.RawMessage) (T, error) {
@@ -70,7 +71,7 @@ type setModeParams struct {
 	Mode      string `json:"mode"`
 }
 
-type archiveParams struct {
+type archiveParams struct { // session.archive and session.delete
 	SessionID      string `json:"sessionId"`
 	RemoveWorktree bool   `json:"removeWorktree"`
 }
@@ -121,6 +122,47 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 	case "harness.list":
 		return call(raw, func(p harnessListParams) (any, error) {
 			return map[string]any{"harnesses": o.Registry().Installed(ctx, p.Refresh)}, nil
+		})
+
+	case "harness.update":
+		return call(raw, func(p harnessParams) (any, error) { return c.s.updateAgent(ctx, p.Harness) })
+
+	case "harness.login":
+		return call(raw, func(p harnessParams) (any, error) { return c.s.loginAgent(ctx, p.Harness) })
+
+	case "server.settings":
+		return o.Settings(ctx)
+
+	case "server.setSettings":
+		return call(raw, func(p model.ServerSettings) (any, error) { return o.SetSettings(ctx, p) })
+
+	case "server.checkUpdate":
+		return call(raw, func(p checkUpdateParams) (any, error) { return c.s.checkUpdate(ctx, p) })
+
+	case "server.update":
+		return c.s.updateServer(ctx)
+
+	case "task.list":
+		list := []model.Task{}
+		if c.s.Tasks != nil {
+			list = c.s.Tasks.List()
+		}
+		return map[string]any{"tasks": list}, nil
+
+	case "task.get", "task.cancel", "task.input":
+		if c.s.Tasks == nil {
+			return nil, &methodError{"not_found", tasks.ErrNotFound.Error()}
+		}
+		return call(raw, func(p taskInputParams) (any, error) {
+			switch method {
+			case "task.get":
+				t, err := c.s.Tasks.Get(p.ID)
+				return t, c.s.taskError(err)
+			case "task.cancel":
+				return nil, c.s.taskError(c.s.Tasks.Cancel(p.ID))
+			default:
+				return nil, c.s.taskError(c.s.Tasks.Input(p.ID, p.Text))
+			}
 		})
 
 	case "fs.list":
@@ -186,6 +228,13 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 			c.s.closeTerminal(p.SessionID)
 			defer c.s.closeTerminal(p.SessionID)
 			return nil, o.Archive(ctx, p.SessionID, p.RemoveWorktree)
+		})
+
+	case "session.delete":
+		return call(raw, func(p archiveParams) (any, error) {
+			c.s.closeTerminal(p.SessionID)
+			defer c.s.closeTerminal(p.SessionID)
+			return nil, o.Delete(ctx, p.SessionID, p.RemoveWorktree)
 		})
 
 	case "approval.respond":

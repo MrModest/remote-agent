@@ -72,8 +72,8 @@ struct SessionRow: View {
     }
 }
 
-/// A session to archive, and the server it is on.
-struct ArchiveRequest {
+/// A session to archive or delete, and the server it is on.
+struct SessionRequest {
     let session: Session
     let connection: ServerConnection
 }
@@ -85,7 +85,7 @@ extension View {
     }
 
     /// Confirmation before archiving a session, which can also delete its worktree.
-    func archiveSessionDialog(_ request: Binding<ArchiveRequest?>) -> some View {
+    func archiveSessionDialog(_ request: Binding<SessionRequest?>) -> some View {
         confirmationDialog("Archive session?", isPresented: .init(get: { request.wrappedValue != nil }, set: { if !$0 { request.wrappedValue = nil } }),
                            presenting: request.wrappedValue) { r in
             Button("Archive") { archive(r, removeWorktree: false) }
@@ -96,10 +96,27 @@ extension View {
             Text(r.session.workspace.kind == .worktree ? "The branch \(r.session.workspace.branch ?? "") is kept either way." : "The agent process is stopped.")
         }
     }
+
+    /// Confirmation before deleting a session for good, which can also delete its worktree.
+    func deleteSessionDialog(_ request: Binding<SessionRequest?>) -> some View {
+        confirmationDialog("Delete session?", isPresented: .init(get: { request.wrappedValue != nil }, set: { if !$0 { request.wrappedValue = nil } }),
+                           presenting: request.wrappedValue) { r in
+            Button("Delete", role: .destructive) { delete(r, removeWorktree: false) }
+            if r.session.workspace.kind == .worktree {
+                Button("Delete with worktree", role: .destructive) { delete(r, removeWorktree: true) }
+            }
+        } message: { r in
+            Text(r.session.workspace.kind == .worktree ? "This can't be undone. The branch \(r.session.workspace.branch ?? "") is kept either way." : "This can't be undone.")
+        }
+    }
 }
 
-private func archive(_ r: ArchiveRequest, removeWorktree: Bool) {
+private func archive(_ r: SessionRequest, removeWorktree: Bool) {
     Task { try? await r.connection.archive(r.session.id, removeWorktree: removeWorktree) }
+}
+
+private func delete(_ r: SessionRequest, removeWorktree: Bool) {
+    Task { try? await r.connection.delete(r.session.id, removeWorktree: removeWorktree) }
 }
 
 private struct RemoveServerDialog: ViewModifier {

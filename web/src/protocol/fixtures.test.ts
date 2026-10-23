@@ -8,6 +8,7 @@ import {
   contextFraction,
   effortsForModel,
   imageIdLinkedBy,
+  installable,
   modelName,
   parseDate,
   usable,
@@ -18,8 +19,11 @@ import {
   type PairResult,
   type ServerInfo,
   type SlashCommand,
+  type ServerSettings,
+  type ServerTask,
   type Session,
   type TerminalMessage,
+  type UpdateInfo,
 } from "./models";
 
 const dir = join(import.meta.dirname, "../../../protocol/fixtures");
@@ -99,6 +103,11 @@ describe("fixtures", () => {
     expect(claude.commands?.map((c) => "/" + c.name)).toEqual(["/compact"]);
     expect(claude.commands?.[0].description).toBeTruthy();
     expect(harnesses[1].commands).toBeUndefined();
+    // What the server settings offer for each agent; older servers leave them out.
+    expect(claude.caps).toMatchObject({ update: true, login: true, oneShot: true });
+    expect(harnesses[1].caps.update).toBeUndefined();
+    expect(harnesses[1].caps.login).toBeUndefined();
+    expect(harnesses[1].caps.oneShot).toBeUndefined();
 
     const diff: Diff = load("response_diff.json").result;
     expect(diff.files.map((f) => f.status)).toEqual(["modified", "renamed", "added"]);
@@ -126,6 +135,38 @@ describe("fixtures", () => {
     const info: ServerInfo = load("response_server_info.json").result;
     expect(info.terminal).toBe(true);
     expect(info.deviceId).toBe("dev1");
+  });
+
+  it("server management", () => {
+    const settings: ServerSettings = load("response_server_settings.json").result;
+    expect(settings.systemAgent).toEqual({ harness: "claude", model: "haiku", effort: "low" });
+
+    const update: UpdateInfo = load("response_check_update.json").result;
+    expect(update).toMatchObject({ current: "0.11.0", latest: "0.12.0", available: true, via: "app" });
+    expect(update.url).toMatch(/^https:\/\/github\.com\/.+\/v0\.12\.0$/);
+    expect(update.busy).toEqual(["Fix the tests"]);
+    expect(update.reason).toBeUndefined();
+    expect(installable(update)).toBe(true);
+    expect(installable({ ...update, via: undefined, reason: "rad dev is a development build, which doesn't update itself." })).toBe(false);
+
+    const login: ServerTask = load("response_task.json").result;
+    expect(login).toMatchObject({ id: "k1", kind: "login", harness: "claude", status: "running", input: true });
+    expect(login.url).toBe("https://claude.com/cai/oauth/authorize?code=true");
+    expect(login.output.split("\n")[0]).toBe("$ claude auth login");
+    expect(Number.isNaN(parseDate(login.startedAt))).toBe(false);
+    expect(login.endedAt).toBeUndefined();
+    expect(login.version).toBeUndefined();
+
+    const tasks: ServerTask[] = load("response_task_list.json").result.tasks;
+    expect(tasks.map((t) => [t.kind, t.status])).toEqual([
+      ["update_agent", "succeeded"],
+      ["update_server", "failed"],
+    ]);
+    expect(tasks[0]).toMatchObject({ harness: "codex", version: "0.164.0" });
+    expect(tasks[0].input).toBeUndefined();
+    expect(tasks[1].harness).toBeUndefined();
+    expect(tasks[1].error).toMatch(/checksum/);
+    expect(parseDate(tasks[1].endedAt) - parseDate(tasks[1].startedAt)).toBe(5000);
   });
 
   it("terminal messages", () => {

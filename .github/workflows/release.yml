@@ -1,14 +1,22 @@
 # Builds rad for Linux and macOS (arm64 and x86-64), the Mac apps, Remote
-# Agent and Remote Agent Server, for Apple silicon, and the Android app, signed
-# with the key in the repository's secrets. Checks that the web client
-# builds; it isn't published yet. Pushing a tag like v0.2.0 publishes them as that tag's
-# release; running the workflow by hand only keeps them as run artifacts.
+# Agent and Remote Agent Server, for Apple silicon, signed with Developer ID
+# and notarized, and the Android app, signed with the key in the repository's
+# secrets. Checks that the web client builds; it isn't published yet. Pushing
+# a tag like v0.2.0 publishes them as that tag's release, with the Mac apps'
+# update feeds; running the workflow by hand only keeps them as run artifacts.
 name: Release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version for the Mac apps, such as 0.10.0-test.1, to try their updates (a tag sets its own)
+        required: false
+      bundle_id:
+        description: Bundle ID for the Mac apps, such as dev.remote-agent.updatetest, so that test builds keep apart from installed ones (the Server app adds .server)
+        required: false
 
 permissions:
   contents: read
@@ -79,9 +87,11 @@ jobs:
           - scheme: RemoteAgent-macOS
             app: Remote Agent
             asset: Remote-Agent-macOS-arm64.zip
+            appcast: Remote-Agent-macOS-appcast.xml   # the app's SUFeedURL
           - scheme: RemoteAgentServer
             app: Remote Agent Server
             asset: Remote-Agent-Server-macOS-arm64.zip
+            appcast: Remote-Agent-Server-macOS-appcast.xml
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7   # build-rad.sh compiles rad into the Server app
@@ -91,23 +101,75 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Import the signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          # A release is signed with Developer ID and notarized, so that macOS
+          # opens it and keeps its permissions across updates. A run by hand
+          # without the certificate signs ad hoc.
+          if [ -z "$CERTIFICATE_BASE64" ]; then
+            if [[ $GITHUB_REF == refs/tags/v* ]]; then
+              echo "::error::MACOS_CERTIFICATE_P12_BASE64 isn't set; see Development in README.md"; exit 1
+            fi
+            exit 0
+          fi
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          echo "$CERTIFICATE_BASE64" | base64 -d > "$RUNNER_TEMP/certificate.p12"
+          # The certificate's issuer, in case the runner doesn't have it.
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - name: Build
         working-directory: apple
         run: |
           xcodebuild -version
-          # Tags set the app's version (and that of rad inside the Server app);
-          # other runs keep project.yml's.
+          # Tags set the app's version (and that of rad inside the Server app),
+          # and a build number for Sparkle that only grows: 0.3.0-beta.2 →
+          # 30002, 0.3.0 → 30099, as for Android. Other runs keep project.yml's,
+          # unless started with a version.
+          v=$INPUT_VERSION
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then v=${GITHUB_REF_NAME#v}; fi
           version=()
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=(MARKETING_VERSION="${GITHUB_REF_NAME#v}"); fi
+          if [ -n "$v" ]; then
+            [[ $v =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[A-Za-z]*\.?([0-9]+))? ]] || { echo "::error::Not a version: $v"; exit 1; }
+            m=("${BASH_REMATCH[@]}")
+            version=(MARKETING_VERSION="$v" CURRENT_PROJECT_VERSION=$((m[1] * 1000000 + m[2] * 10000 + m[3] * 100 + ${m[5]:-99})))
+          fi
+          if [ -n "$INPUT_BUNDLE_ID" ]; then
+            id=$INPUT_BUNDLE_ID
+            if [ "$SCHEME" = RemoteAgentServer ]; then id=$id.server; fi
+            version+=(PRODUCT_BUNDLE_IDENTIFIER="$id")
+          fi
+          # Developer ID needs no provisioning profile for these entitlements.
+          # Notarization wants a secure timestamp and no get-task-allow.
+          if [ -n "$SIGNING_KEYCHAIN" ]; then
+            signing=(CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_IDENTITY="Developer ID Application"
+              CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp)
+          else
+            signing=(DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=-)
+          fi
           xcodegen
           # SwiftTerm, the client's terminal, has Metal shaders and a build plugin.
           xcodebuild -downloadComponent MetalToolchain
-          # No team or Developer ID here, so the app is signed ad hoc.
           xcodebuild -project RemoteAgent.xcodeproj -scheme "$SCHEME" -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build -skipPackagePluginValidation \
-            ARCHS=arm64 DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- "${version[@]}" build
+            ARCHS=arm64 "${signing[@]}" "${version[@]}" build
         env:
           SCHEME: ${{ matrix.scheme }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUNDLE_ID: ${{ inputs.bundle_id }}
       - name: Package
         run: |
           app="apple/build/Build/Products/Release/$APP.app"
@@ -115,11 +177,64 @@ jobs:
           for exe in "$app"/Contents/MacOS/*; do lipo -archs "$exe"; done
           plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist"
           if [ -e "$app/Contents/MacOS/rad" ]; then "$app/Contents/MacOS/rad" version; fi
+          if [ -n "$SIGNING_KEYCHAIN" ]; then
+            for exe in "$app"/Contents/MacOS/*; do codesign -dvv "$exe" 2>&1 | grep -E '^(Identifier|Authority|Timestamp)='; done
+            # Apple checks the app and issues a ticket, stapled to the app so
+            # that its first launch needn't ask Apple.
+            key=$RUNNER_TEMP/notary.p8
+            echo "$NOTARY_KEY_BASE64" | base64 -d > "$key"
+            notary=(--key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
+            ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+            # Submitting and waiting are separate, and retried, so that the
+            # runner losing its connection for a moment doesn't fail the job.
+            id=
+            for attempt in 1 2 3; do
+              if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" "${notary[@]}" --output-format json > "$RUNNER_TEMP/notary.json" &&
+                id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json"); then break; fi
+              cat "$RUNNER_TEMP/notary.json"; sleep 30
+            done
+            if [ -z "$id" ]; then echo "::error::Couldn't submit for notarization"; exit 1; fi
+            echo "submission $id"
+            for attempt in 1 2 3 4 5; do
+              if xcrun notarytool wait "$id" "${notary[@]}" --timeout 1h --output-format json > "$RUNNER_TEMP/notary.json" &&
+                status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json"); then break; fi
+              cat "$RUNNER_TEMP/notary.json"; status=; sleep 30
+            done
+            cat "$RUNNER_TEMP/notary.json"; echo
+            xcrun notarytool log "$id" "${notary[@]}" || true
+            if [ "$status" != Accepted ]; then echo "::error::Notarization: ${status:-no answer}"; exit 1; fi
+            xcrun stapler staple "$app"
+            spctl --assess --type execute -vv "$app"
+          fi
           mkdir dist
           ditto -c -k --keepParent "$app" "dist/$ASSET"
+
+          # The app's update feed. Its notes are the release's, up to its
+          # Downloads; the release is usually written by the time the apps
+          # are built. Without the key, a run by hand makes no feed.
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            if [[ $GITHUB_REF == refs/tags/v* ]]; then echo "::error::SPARKLE_PRIVATE_KEY isn't set; see Development in README.md"; exit 1; fi
+          else
+            gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null | sed '/^## Downloads/,$d' > "$RUNNER_TEMP/notes.md" || true
+            download="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+            apple/scripts/appcast.sh "$app" "dist/$ASSET" "$download/$ASSET" \
+              "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" "$RUNNER_TEMP/notes.md" > "dist/$APPCAST"
+            cat "dist/$APPCAST"
+          fi
         env:
           APP: ${{ matrix.app }}
           ASSET: ${{ matrix.asset }}
+          APPCAST: ${{ matrix.appcast }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_API_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Remove the signing keychain
+        if: always() && env.SIGNING_KEYCHAIN != ''
+        run: |
+          security delete-keychain "$SIGNING_KEYCHAIN"
+          rm -f "$RUNNER_TEMP/notary.p8"
       - uses: actions/upload-artifact@v7
         with:
           name: mac-${{ matrix.scheme }}
@@ -199,13 +314,20 @@ jobs:
             - **Remote Agent for Android** (`Remote-Agent-Android.apk`): the client app for Android 16 or later. Open it on the phone and allow installing from your browser; later releases install over it.
             - **Web client**: the Docker image `ghcr.io/buldezir/remote-agent-web`, tagged `latest` and with the version, such as `0.2.0`. `web/compose.example.yaml` runs it.
 
-            Both Mac apps need macOS 27 on Apple silicon. They are signed ad hoc, not notarized, so macOS blocks their first launch: allow them under System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine` on the app. After each update, macOS asks again for the Server app's permissions and for the client's access to its saved pairing tokens. To update only rad, and keep those permissions, use **Update rad** in the Server app's menu.
+            Both Mac apps need macOS 27 on Apple silicon. They are signed with Developer ID and notarized by Apple, and update themselves: **Check for Updates…** is in the Remote Agent menu, and in the Server app's menu bar menu. Drag each app into Applications on its own: macOS runs apps dragged in together from a temporary copy, which can't update itself. If an app says it can't be updated, quit it and run `xattr -dr com.apple.quarantine` on it in Applications.
         run: |
           sums=$(sha256sum *) && echo "$sums" > SHA256SUMS
+          # The Mac apps' update feeds go up last, so that an app that reads
+          # one finds its zip.
+          assets=() appcasts=()
+          for f in *; do
+            if [[ $f == *-appcast.xml ]]; then appcasts+=("$f"); else assets+=("$f"); fi
+          done
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" * --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
             prerelease=()
             if [[ $TAG == *-* ]]; then prerelease=(--prerelease); fi
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "${prerelease[@]}" *
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "${prerelease[@]}" "${assets[@]}"
           fi
+          if [ ${#appcasts[@]} -gt 0 ]; then gh release upload "$TAG" "${appcasts[@]}" --clobber; fi

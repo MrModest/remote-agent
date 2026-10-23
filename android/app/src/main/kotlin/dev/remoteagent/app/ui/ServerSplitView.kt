@@ -34,13 +34,21 @@ fun ServerSplitView(
     val settings = LocalSettings.current
     val servers = serverStates()
     var newSessionOn by rememberSaveable { mutableStateOf<String?>(null) }
-    var archiving by remember { mutableStateOf<ArchiveRequest?>(null) }
+    var newSessionIn by rememberSaveable { mutableStateOf<String?>(null) }
+    var archiving by remember { mutableStateOf<SessionRequest?>(null) }
+    var deleting by remember { mutableStateOf<SessionRequest?>(null) }
     var removing by remember { mutableStateOf<SavedServer?>(null) }
+    var settingsOf by rememberSaveable { mutableStateOf<String?>(null) }
     val actions = remember {
         SessionActions(
-            newSession = { newSessionOn = it.server.value.id },
+            startSession = { c, projectId ->
+                newSessionOn = c.server.value.id
+                newSessionIn = projectId
+            },
             archive = { archiving = it },
+            delete = { deleting = it },
             remove = { removing = it },
+            serverSettings = { settingsOf = it.server.value.id },
         )
     }
 
@@ -68,6 +76,16 @@ fun ServerSplitView(
         }
     }
 
+    // The Columns layout's project is no longer on the server, as when it was
+    // forgotten, here or on another device, so All Sessions shows instead.
+    // Only the synced index can tell.
+    val projectGone = (collection as? SessionCollection.Project)?.let { p ->
+        servers.firstOrNull { it.id == p.serverId }?.let { it.indexSynced && p.projectId !in it.projects }
+    } == true
+    LaunchedEffect(projectGone) {
+        if (projectGone) settings.put(Keys.sessionCollection, SessionCollection.All.stored)
+    }
+
     CompositionLocalProvider(LocalSessionActions provides actions) {
         when (layout) {
             SidebarLayout.COLUMNS -> ColumnsSidebar(
@@ -79,10 +97,14 @@ fun ServerSplitView(
     }
 
     ArchiveSessionDialog(archiving, onDismiss = { archiving = null })
+    DeleteSessionDialog(deleting, onDismiss = { deleting = null })
     val removed = removing
     RemoveServerDialog(removed, onDismiss = { removing = null }, onRemove = { removed?.let(onRemoved) })
+    servers.firstOrNull { it.id == settingsOf }?.let { s ->
+        ServerSettingsDialog(s.connection, onDismiss = { settingsOf = null })
+    }
     servers.firstOrNull { it.id == newSessionOn }?.let { s ->
-        NewSessionDialog(s.connection, onDismiss = { newSessionOn = null }, onCreated = { session ->
+        NewSessionDialog(s.connection, newSessionIn, onDismiss = { newSessionOn = null }, onCreated = { session ->
             newSessionOn = null
             onOpenSession(SessionKey(s.id, session.id))
         })

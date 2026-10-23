@@ -107,3 +107,19 @@ func TestCommandDiscoveryAllowsEventsAndStop(t *testing.T) {
 		t.Fatal("catalog did not finish")
 	}
 }
+
+func TestCommandsRejectDeletedSession(t *testing.T) {
+	e := newEnv(t, false)
+	s := e.create(CreateSessionParams{})
+	a, err := e.o.actor(bg, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A concurrent caller can retain this actor before Delete removes it from the map.
+	if err := a.delete(bg, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.o.Commands(bg, s.ID); CodeOf(err) != CodeNotFound {
+		t.Fatalf("deleted session catalog: %v", err)
+	}
+}

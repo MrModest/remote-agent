@@ -45,19 +45,20 @@ private func menuBarIcon(running: Bool) -> NSImage {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let rad: RadSupervisor
-    let updater: RadUpdater
+    let updater: AppUpdater
     let loginItem = LoginItem()
 
     override init() {
         let rad = RadSupervisor()
         self.rad = rad
-        updater = RadUpdater(rad: rad)
+        updater = AppUpdater(rad: rad)
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { await rad.start() }
-        updater.startChecking()
+        updater.start()
+        Task.detached(priority: .background) { RadBinary.removeOldDownloads() }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -105,7 +106,7 @@ func show(_ id: String, with openWindow: OpenWindowAction) {
 
 struct MenuContent: View {
     let rad: RadSupervisor
-    let updater: RadUpdater
+    let updater: AppUpdater
     let loginItem: LoginItem
     @Environment(\.openWindow) private var openWindow
 
@@ -113,9 +114,6 @@ struct MenuContent: View {
         Text(status)
         if case .busy(let message) = rad.state {
             Text(message)
-        }
-        if let note = rad.note {
-            Text(note)
         }
         if let ready = rad.ready {
             ForEach(ready.urls, id: \.self) { Text($0) }
@@ -162,18 +160,13 @@ struct MenuContent: View {
 
     @ViewBuilder private var updateItems: some View {
         if RadBinary.updatable {
-            switch updater.state {
-            case .available(let release):
-                Button("Update rad to \(release.version)…") { Task { await updater.update() } }
-                if let url = release.url {
-                    Button("Release Notes") { NSWorkspace.shared.open(url) }
-                }
-            case .updating(let version):
-                Text("Updating rad to \(version)…")
-            case .checking:
-                Text("Checking for Updates…")
-            case .idle:
-                Button("Check for Updates…") { Task { await updater.check(manual: true) } }
+            if let version = updater.postponed {
+                Button("Install \(version) and Restart…") { updater.installPostponed() }
+            } else if let version = updater.available {
+                Button("Update to \(version)…") { updater.checkForUpdates() }
+            } else {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheck)
             }
         }
     }

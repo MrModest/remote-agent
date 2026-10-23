@@ -35,6 +35,32 @@ export function isBusy(s: Session): boolean {
   return s.status === "running" || (s.status === "idle" && !!s.backgroundTasks?.length);
 }
 
+/** How much the session asks for a look: an answer it waits for, then a
+ *  failure, then work, then work left in the background. Idle and stopped
+ *  sessions ask nothing. */
+export function urgency(s: Session): number {
+  switch (s.status) {
+    case "awaiting_approval":
+      return 4;
+    case "error":
+      return 3;
+    case "running":
+      return 2;
+    case "idle":
+      return s.backgroundTasks?.length ? 1 : 0;
+    default:
+      return 0;
+  }
+}
+
+/** The session whose state a project's row shows for all of them: the one
+ *  that asks most, if any does. */
+export function mostPressing(sessions: Session[]): Session | undefined {
+  let found: Session | undefined;
+  for (const s of sessions) if (urgency(s) > (found ? urgency(found) : 0)) found = s;
+  return found;
+}
+
 /** Every server's sessions, the latest first. */
 export function allSessions(store: ServerStore, archived: boolean): ServerSession[] {
   return store.servers

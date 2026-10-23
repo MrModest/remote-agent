@@ -7,10 +7,12 @@ struct ServerHomeView: View {
     let connection: ServerConnection
     @Environment(\.dismiss) private var dismiss
     @State private var removing: SavedServer?
+    @State private var showSettings = false
     @State private var showNew = false
     @State private var openSession: String?
     @State private var showArchived = false
-    @State private var archiving: ArchiveRequest?
+    @State private var archiving: SessionRequest?
+    @State private var deleting: SessionRequest?
 
     var body: some View {
         List { sections }
@@ -43,6 +45,10 @@ struct ServerHomeView: View {
                     Button("Reconnect", systemImage: "arrow.clockwise") { connection.retry() }
                 }
                 ToolbarItem(placement: .secondaryAction) {
+                    Button("Server Settings", systemImage: "gearshape.2") { showSettings = true }
+                        .disabled(connection.state != .connected)
+                }
+                ToolbarItem(placement: .secondaryAction) {
                     SettingsButton()
                 }
                 ToolbarItem(placement: .secondaryAction) {
@@ -56,7 +62,12 @@ struct ServerHomeView: View {
                 }
                 .appStyle()
             }
+            .sheet(isPresented: $showSettings) {
+                ServerSettingsView(connection: connection)
+                    .appStyle()
+            }
             .archiveSessionDialog($archiving)
+            .deleteSessionDialog($deleting)
             .refreshable {
                 if connection.state != .connected { connection.retry() }
                 await connection.refreshHarnesses(force: true)
@@ -132,14 +143,17 @@ struct ServerHomeView: View {
         .listRowBackground(Palette.base)
         .swipeActions {
             if !s.archived {
-                Button("Archive", systemImage: "archivebox") { archiving = ArchiveRequest(session: s, connection: connection) }
+                Button("Archive", systemImage: "archivebox") { archiving = SessionRequest(session: s, connection: connection) }
                     .tint(Palette.blue)
             }
+            Button("Delete", systemImage: "trash") { deleting = SessionRequest(session: s, connection: connection) }
+                .tint(Palette.red)
         }
         .contextMenu {
             if !s.archived {
-                Button("Archive…", systemImage: "archivebox") { archiving = ArchiveRequest(session: s, connection: connection) }
+                Button("Archive…", systemImage: "archivebox") { archiving = SessionRequest(session: s, connection: connection) }
             }
+            Button("Delete…", systemImage: "trash", role: .destructive) { deleting = SessionRequest(session: s, connection: connection) }
         }
     }
 }

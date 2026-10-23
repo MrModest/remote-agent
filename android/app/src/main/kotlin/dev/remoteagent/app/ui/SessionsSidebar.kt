@@ -97,22 +97,28 @@ fun RowScope.SidebarToolbar(servers: List<ServerState>, onAdd: () -> Unit, onSet
     }
 }
 
-/** Starts a session on the server connected; with more than one, a menu offers each. */
+/**
+ * Starts a session on the server connected; with more than one, a menu offers
+ * each. In the Columns layout, a project's collection starts it in that
+ * project, on its server.
+ */
 @Composable
-fun NewSessionButton(servers: List<ServerState>) {
+fun NewSessionButton(servers: List<ServerState>, collection: SessionCollection? = null) {
     val actions = LocalSessionActions.current
     val connected = servers.filter { it.state == ConnectionState.Connected }
     var menu by remember { mutableStateOf(false) }
+    // Its server alone, if the project was forgotten while chosen.
+    fun projectOn(s: ServerState) = (collection as? SessionCollection.Project)?.takeIf { it.serverId == s.id && it.projectId in s.projects }?.projectId
     Box {
         IconButton(
-            { if (connected.size == 1) actions.newSession(connected[0].connection) else menu = true },
+            { if (connected.size == 1) actions.newSession(connected[0].connection, projectOn(connected[0])) else menu = true },
             enabled = connected.isNotEmpty(),
             modifier = Modifier.testTag("new-session"),
         ) {
             Icon(painterResource(Icons.newSession), "New session")
         }
         DropdownMenu(menu, { menu = false }, containerColor = palette.mantle) {
-            for (s in connected) MenuItem("On ${s.name}", Icons.server) { menu = false; actions.newSession(s.connection) }
+            for (s in connected) MenuItem("On ${s.name}", Icons.server) { menu = false; actions.newSession(s.connection, projectOn(s)) }
         }
     }
 }
@@ -282,12 +288,33 @@ fun ServerHeader(s: ServerState, expanded: Boolean, onExpand: (Boolean) -> Unit,
     }
 }
 
-/** A server's actions, for its menus: a new session, reconnecting, removing it. */
+/** A project's actions, for the menu a long press on its row opens: a new session in it, and forgetting it. */
+@Composable
+fun ProjectMenu(expanded: Boolean, onDismiss: () -> Unit, s: ServerState, projectId: String) {
+    val actions = LocalSessionActions.current
+    val connected = s.state == ConnectionState.Connected
+    DropdownMenu(expanded, onDismiss, containerColor = palette.mantle) {
+        MenuItem("New session", Icons.add, enabled = connected) {
+            onDismiss()
+            actions.newSession(s.connection, projectId)
+        }
+        HorizontalDivider(color = palette.surface0)
+        // The server keeps a project while it has sessions that aren't archived.
+        MenuItem("Forget project", Icons.forget, enabled = connected && s.active.none { it.projectId == projectId }) {
+            onDismiss()
+            s.connection.scope.launch { runCatching { s.connection.removeProject(projectId) } }
+        }
+    }
+}
+
+/** A server's actions, for its menus: a new session, reconnecting, its settings, removing it. */
 @Composable
 fun ServerMenuItems(s: ServerState, dismiss: () -> Unit) {
     val actions = LocalSessionActions.current
-    MenuItem("New session on ${s.name}", Icons.add, enabled = s.state == ConnectionState.Connected) { dismiss(); actions.newSession(s.connection) }
+    val connected = s.state == ConnectionState.Connected
+    MenuItem("New session on ${s.name}", Icons.add, enabled = connected) { dismiss(); actions.newSession(s.connection) }
     MenuItem("Reconnect", Icons.reconnect) { dismiss(); s.connection.retry() }
+    MenuItem("Server Settings…", Icons.serverSettings, enabled = connected) { dismiss(); actions.serverSettings(s.connection) }
     HorizontalDivider(color = palette.surface0)
     MenuItem("Remove ${s.name}…", Icons.delete, color = palette.red) { dismiss(); actions.remove(s.server) }
 }

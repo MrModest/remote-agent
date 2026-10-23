@@ -23,6 +23,7 @@ import (
 	"remote-agent/internal/model"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/tasks"
 	"remote-agent/internal/terminal"
 )
 
@@ -45,6 +46,11 @@ type Server struct {
 	// Terminals runs the shells clients open from a session's menu; nil
 	// offers none.
 	Terminals *terminal.Manager
+
+	// Tasks runs the updates and logins clients start; nil offers none.
+	Tasks *tasks.Manager
+	// Updater updates rad itself; nil: it doesn't.
+	Updater Updater
 }
 
 func NewServer(st *store.Store, hub *events.Hub, orch *orchestrator.Orchestrator, fs *fsbrowse.Browser, imgs *images.Store, serverID, name string, log *slog.Logger) *Server {

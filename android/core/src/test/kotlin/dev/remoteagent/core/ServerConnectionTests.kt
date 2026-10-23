@@ -6,6 +6,7 @@ import dev.remoteagent.core.FakeRad.Companion.session
 import dev.remoteagent.core.FakeRad.Companion.upserted
 import dev.remoteagent.core.net.PING_INTERVAL
 import dev.remoteagent.core.net.RpcError
+import dev.remoteagent.core.net.params
 import dev.remoteagent.core.store.ConnectionState
 import dev.remoteagent.core.store.ImageCache
 import dev.remoteagent.core.store.SavedServer
@@ -239,6 +240,64 @@ class ServerConnectionTests {
         assertEquals("disconnected", e.code)
         assertIs<ConnectionState.Failed>(c.state.value)
         assertTrue(store.outbox.value.isEmpty())
+        withContext(dispatcher) { c.stop() }
+    }
+
+    private fun removed(id: String) = buildJsonObject {
+        put("type", "session.removed")
+        put("id", id)
+        put("ts", "2026-10-09T12:00:00Z")
+    }
+
+    @Test
+    fun deletedSessionLeavesTheIndexAndItsStore() = runBlocking {
+        rad.answer = { r, method, params ->
+            when (method) {
+                "server.info" -> FakeRad.serverInfo
+                "subscribe" -> {
+                    val stream = params.getValue("stream").jsonPrimitive.content
+                    if (stream == "index") {
+                        r.notify("events", events("index", 1L to upserted("project", project("p1")), 2L to upserted("session", session("s1"))))
+                        r.notify("synchronized", synchronized(2, reset = true))
+                        subscribed(2)
+                    } else {
+                        r.notify("events", events(stream, 1L to upserted("session", session("s1"))))
+                        r.notify("synchronized", buildJsonObject {
+                            put("stream", stream)
+                            put("seq", 1)
+                            put("reset", true)
+                        })
+                        buildJsonObject {
+                            put("stream", stream)
+                            put("seq", 1)
+                        }
+                    }
+                }
+                "session.delete" -> {
+                    // As rad: the removal goes to the index and to the session's own stream.
+                    r.notify("events", events("index", 3L to removed("s1")))
+                    r.notify("events", events("session:s1", 2L to removed("s1")))
+                    JsonObject(emptyMap())
+                }
+                else -> JsonObject(emptyMap())
+            }
+        }
+        server.upgrade(rad)
+        val c = connect()
+        withTimeout(5.seconds) { c.indexSynced.first { it } }
+        val store = withContext(dispatcher) {
+            c.sessionStore("s1").also {
+                it.draft = "half a thought"
+                it.activate()
+            }
+        }
+        withTimeout(5.seconds) { store.synced.first { it } }
+
+        withContext(dispatcher) { c.delete("s1", removeWorktree = true) }
+        assertEquals(params("sessionId" to "s1", "removeWorktree" to true), rad.nextCall("session.delete")["params"])
+        withTimeout(5.seconds) { store.removed.first { it } }
+        withTimeout(5.seconds) { c.sessions.first { "s1" !in it } }
+        assertEquals("", withContext(dispatcher) { store.draft })
         withContext(dispatcher) { c.stop() }
     }
 }

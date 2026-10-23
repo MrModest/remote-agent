@@ -64,6 +64,9 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
     val children: StateFlow<Map<String, List<Item>>> = _children.asStateFlow()
     private val _synced = MutableStateFlow(false)
     val synced: StateFlow<Boolean> = _synced.asStateFlow()
+    /** The session was deleted on the server: its stream says so. */
+    private val _removed = MutableStateFlow(false)
+    val removed: StateFlow<Boolean> = _removed.asStateFlow()
     /** Optimistic user messages not yet confirmed by the server, keyed by commandId, in the order sent. */
     private val _outbox = MutableStateFlow<Map<String, Outgoing>>(emptyMap())
     val outbox: StateFlow<Map<String, Outgoing>> = _outbox.asStateFlow()
@@ -190,6 +193,14 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
             "turn.upserted" -> ev.turn?.let { turnMap[it.id] = it }
             "item.upserted" -> ev.item?.let {
                 itemMap[it.id] = it
+                return true
+            }
+            "session.removed" -> {
+                _session.value = null
+                turnMap.clear()
+                itemMap.clear()
+                _outbox.value = emptyMap()
+                _removed.value = true
                 return true
             }
         }

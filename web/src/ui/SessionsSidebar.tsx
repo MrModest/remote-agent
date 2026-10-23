@@ -1,4 +1,4 @@
-import { Ellipsis, Hand, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
+import { Ellipsis, FolderMinus, Hand, Pencil, Plus, RefreshCw, ServerCog, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { Session } from "../protocol/models";
 import { useObserved, useObservedAll } from "../store/observable";
@@ -11,15 +11,19 @@ import { InboxSidebar } from "./InboxSidebar";
 import { Menu, Spinner, type MenuEntry } from "./primitives";
 import { ProjectsSidebar } from "./ProjectsSidebar";
 import type { Route } from "./router";
-import { needsYou, type SidebarLayout } from "./sidebarLayout";
+import { needsYou, type SessionCollection, type SidebarLayout } from "./sidebarLayout";
 
 export interface ServerActions {
   pair: () => void;
   settings: () => void;
-  newSession: (c: ServerConnection) => void;
+  /** A new session on the server, in one of its projects when given. */
+  newSession: (c: ServerConnection, projectID?: string) => void;
   archive: (c: ServerConnection, s: Session) => void;
+  delete: (c: ServerConnection, s: Session) => void;
   rename: (s: SavedServer) => void;
   remove: (s: SavedServer) => void;
+  /** The server's own settings: rad's updates, its agents, the system agent. */
+  serverSettings: (c: ServerConnection) => void;
 }
 
 /** Tries to connect again, and, as pulling to refresh in the apps, looks for newly installed agents. */
@@ -87,25 +91,71 @@ export function useCollapsed(servers: SavedServer[]) {
 
 /** Starts a session on the server connected, or, with several, on the one
  *  picked from a menu. */
-export function NewSessionButton({ onNew }: { onNew: (c: ServerConnection) => void }) {
+/** Starts a session; with more than one server connected, a menu offers
+ *  each. In the Columns layout, a project's collection starts it in that
+ *  project, on its server. */
+export function NewSessionButton({ onNew, collection }: { onNew: (c: ServerConnection, projectID?: string) => void; collection?: SessionCollection }) {
   const store = useServerStore();
   const connections = store.servers.map((s) => store.connection(s));
   useObservedAll(connections);
   const connected = connections.filter((c) => c.state.kind === "connected");
+  // Its server alone, if the project was forgotten while chosen.
+  const projectOn = (c: ServerConnection) =>
+    collection?.kind === "project" && collection.serverID === c.server.id && c.projects.has(collection.projectID) ? collection.projectID : undefined;
+  const projectName = (c: ServerConnection) => c.projects.get(projectOn(c) ?? "")?.name;
   if (connected.length > 1) {
-    return <Menu title="New session" label={<SquarePen size={19} />} entries={connected.map((c) => ({ label: `On ${c.server.name}`, onSelect: () => onNew(c) }))} />;
+    const inProject = connected.find(projectName);
+    return (
+      <Menu
+        title={inProject ? `New session in ${projectName(inProject)}` : "New session"}
+        label={<SquarePen size={19} />}
+        entries={connected.map((c) => ({ label: `On ${c.server.name}`, onSelect: () => onNew(c, projectOn(c)) }))}
+      />
+    );
   }
   const only = connected[0];
+  const project = only && projectName(only);
   return (
     <button
       className="icon-button"
-      onClick={() => only && onNew(only)}
+      onClick={() => only && onNew(only, projectOn(only))}
       disabled={!only}
-      title={only ? `New session on ${only.server.name}` : "New session"}
+      title={project ? `New session in ${project}` : only ? `New session on ${only.server.name}` : "New session"}
       aria-label="New session"
     >
       <SquarePen size={19} />
     </button>
+  );
+}
+
+/** A project's + and ⋯, beside its row: a new session in it, and its
+ *  actions, which forget it too. On hover they take the place of the row's
+ *  count (`row-plus-count`). */
+export function ProjectActions({ connection, projectID, name, actions }: { connection: ServerConnection; projectID: string; name: string; actions: ServerActions }) {
+  if (connection.state.kind !== "connected") return null;
+  // The server keeps a project while it has sessions that aren't archived.
+  const hasSessions = connection.activeSessions.some((s) => s.projectId === projectID);
+  return (
+    <>
+      <button
+        className="icon-button row-plus"
+        onClick={() => actions.newSession(connection, projectID)}
+        title={`New session in ${name}`}
+        aria-label={`New session in ${name}`}
+      >
+        <Plus size={15} />
+      </button>
+      <Menu
+        className="icon-button row-plus"
+        title={`${name} actions`}
+        label={<Ellipsis size={15} />}
+        entries={[
+          { label: `New session in ${name}`, icon: SquarePen, onSelect: () => actions.newSession(connection, projectID) },
+          "divider",
+          { label: "Forget project", icon: FolderMinus, disabled: hasSessions, onSelect: () => connection.removeProject(projectID).catch(() => {}) },
+        ]}
+      />
+    </>
   );
 }
 
@@ -116,9 +166,15 @@ export function serverMenuEntries(connection: ServerConnection, actions: ServerA
     { label: `New session on ${server.name}`, icon: SquarePen, disabled: connection.state.kind !== "connected", onSelect: () => actions.newSession(connection) },
     { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
     { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
+    serverSettingsEntry(connection, actions),
     "divider",
     { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
   ];
+}
+
+/** Opens the server's settings, which need it connected. */
+export function serverSettingsEntry(connection: ServerConnection, actions: ServerActions): MenuEntry {
+  return { label: "Server Settings…", icon: ServerCog, disabled: connection.state.kind !== "connected", onSelect: () => actions.serverSettings(connection) };
 }
 
 /** A server as a section header: its name and connection, and while its

@@ -1,8 +1,10 @@
 package dev.remoteagent.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,11 +33,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.remoteagent.app.platform.AppSettings.Keys
 import dev.remoteagent.app.platform.state
+import dev.remoteagent.core.protocol.Session
 
 /**
  * The Projects layout: each server a section, its projects folding open to
  * their sessions, a line each, what needs you first. The projects come in
- * order of their latest session; a server's archived sessions fold up last.
+ * order of their latest session, those without any by name after them; a
+ * server's archived sessions fold up last.
  * Mirrors apple/Shared/Views/ProjectsSidebar.swift.
  */
 @Composable
@@ -84,10 +89,14 @@ fun ProjectsSidebar(servers: List<ServerState>, selection: SessionKey?, onOpenSe
             for (group in projectGroups(s)) {
                 val shown = "${s.id}/${group.projectId}" !in shut
                 item(key = "${s.id}/project/${group.projectId}") {
-                    ProjectLabel(
-                        group.name, group.items.size, waiting = !shown && group.items.any { it.session.needsYou }, shown = shown,
-                        onToggle = { setProjectExpanded(s.id, group.projectId, it) }, modifier = Modifier.animateItem(),
-                    )
+                    var menu by remember { mutableStateOf(false) }
+                    Box(Modifier.animateItem()) {
+                        ProjectLabel(
+                            group.name, group.items.size, status = group.items.map { it.session }.mostPressing(), shown = shown,
+                            onToggle = { setProjectExpanded(s.id, group.projectId, it) }, onLongClick = { menu = true },
+                        )
+                        ProjectMenu(menu, { menu = false }, s, group.projectId)
+                    }
                 }
                 if (shown) rows(group.items)
             }
@@ -107,22 +116,31 @@ fun ProjectsSidebar(servers: List<ServerState>, selection: SessionKey?, onOpenSe
 }
 
 /**
- * A project in the Projects layout: its name and how many sessions it has;
- * while folded shut, whether one needs you. A tap folds it open or shut.
+ * A project in the Projects layout: its name, the state of its session that
+ * asks most for a look, and how many sessions it has. A tap folds it open or
+ * shut, unless it has no sessions to show, and a long press opens its menu.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectLabel(name: String, count: Int, waiting: Boolean, shown: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+private fun ProjectLabel(
+    name: String, count: Int, status: Session?, shown: Boolean, onToggle: (Boolean) -> Unit, onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val angle by animateFloatAsState(if (shown) 90f else 0f, label = "chevron")
-    SidebarRow(modifier.clickable { onToggle(!shown) }.semantics { stateDescription = if (shown) "Expanded" else "Collapsed" }) {
+    val folds = count > 0
+    SidebarRow(
+        modifier.combinedClickable(onClick = { if (folds) onToggle(!shown) }, onLongClick = onLongClick, onLongClickLabel = "Actions")
+            .semantics { if (folds) stateDescription = if (shown) "Expanded" else "Collapsed" },
+    ) {
         Icon(painterResource(Icons.folder), null, Modifier.size(16.dp), tint = palette.accent)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 name, style = Type.body.copy(fontWeight = FontWeight.Medium), color = palette.text,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
-            if (waiting) Icon(painterResource(Icons.approval), "Needs you", Modifier.size(13.dp), tint = palette.yellow)
+            if (status != null) StatusGlyph(status)
         }
         Text("$count", style = Type.caption.copy(fontFeatureSettings = "tnum"), color = palette.overlay)
-        Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
+        if (folds) Icon(painterResource(Icons.chevronRight), null, Modifier.size(14.dp).rotate(angle), tint = palette.overlay)
     }
 }

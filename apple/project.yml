@@ -14,6 +14,22 @@ packages:
   SwiftTerm:  # exact: 1.99 is the 2.0 preview, with a different API. Needs Xcode's Metal toolchain.
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.20.0
+  Sparkle:  # the Mac apps' updater; scripts/appcast.sh writes its feeds
+    url: https://github.com/sparkle-project/Sparkle
+    minorVersion: 2.10.0
+settings:
+  base:
+    # Release tags set both: the version, and a build number that only grows
+    # (0.3.0-beta.2 → 30002, 0.3.0 → 30099), which Sparkle compares.
+    CURRENT_PROJECT_VERSION: "1"
+    # Sparkle installs only updates signed with the private half, which is
+    # the SPARKLE_PRIVATE_KEY secret (README.md › Development).
+    SPARKLE_PUBLIC_KEY: WQontbp7coFEQwc0h6w4Or5DMoyvPz535n1amUTZNqc=
+    # The Mac apps' hardened runtime, which notarization needs, is on when
+    # they are signed with a team. Signed ad hoc, without one, it would stop
+    # them from loading Sparkle.framework: library validation wants the app
+    # and the framework to share a Team ID, and ad hoc code has none.
+    HARDENED_RUNTIME_WITHOUT_TEAM: NO
 # Both client apps build Shared/ plus their own folder. Small differences
 # inside a shared file sit in #if os(iOS) / #if os(macOS). RemoteAgentServer
 # is the Mac menu bar app that runs rad; it shares no code with them.
@@ -33,8 +49,11 @@ targets:
       path: iOS/Info.plist
       properties:
         CFBundleDisplayName: Remote Agent
-        CFBundleShortVersionString: "0.1"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only the encryption that comes with iOS (TLS), which is exempt, so
+        # TestFlight doesn't hold each build for the export compliance question.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false  # one window on iPad, as on the Mac
@@ -61,6 +80,7 @@ targets:
       base:
         PRODUCT_NAME: RemoteAgent
         PRODUCT_MODULE_NAME: RemoteAgent
+        MARKETING_VERSION: "0.1"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
@@ -77,12 +97,19 @@ targets:
       - package: RAKit
       - package: Textual
       - package: SwiftTerm
+      - package: Sparkle
     info:
       path: macOS/Info.plist
       properties:
         CFBundleDisplayName: Remote Agent
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: "1"
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Sparkle: the feed is the latest release's (scripts/appcast.sh). The
+        # sandboxed app installs through Sparkle's installer service.
+        SUFeedURL: https://github.com/buldezir/remote-agent/releases/latest/download/Remote-Agent-macOS-appcast.xml
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
+        SUEnableAutomaticChecks: true
+        SUEnableInstallerLauncherService: true
         LSApplicationCategoryType: public.app-category.developer-tools
         NSLocalNetworkUsageDescription: Connect to rad running on your computer.
         NSMicrophoneUsageDescription: Dictate messages to your agents.
@@ -103,6 +130,10 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.device.audio-input: true
         com.apple.security.files.user-selected.read-only: true   # images attached from Files
+        # Sparkle's installer service, which replaces the app outside its sandbox.
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
     configFiles:
       Debug: Signing.xcconfig
       Release: Signing.xcconfig
@@ -113,21 +144,33 @@ targets:
         MARKETING_VERSION: "0.1"
         SWIFT_VERSION: "6.0"
         CODE_SIGN_STYLE: Automatic
-        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_HARDENED_RUNTIME: "$(HARDENED_RUNTIME_$(DEVELOPMENT_TEAM:default=WITHOUT_TEAM):default=YES)"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
+    postBuildScripts:
+      - name: Sign Sparkle
+        script: exec "$SRCROOT/scripts/sign-sparkle.sh"
+        basedOnDependencyAnalysis: false
   RemoteAgentServer:
     type: application
     platform: macOS
     sources:
       - path: ServerApp
         excludes: [Info.plist, RemoteAgentServer.entitlements]
+    dependencies:
+      - package: Sparkle
     info:
       path: ServerApp/Info.plist
       properties:
         CFBundleDisplayName: Remote Agent Server
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: "1"
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SUFeedURL: https://github.com/buldezir/remote-agent/releases/latest/download/Remote-Agent-Server-macOS-appcast.xml
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
+        SUEnableAutomaticChecks: true
+        # Downloads updates by itself, so that a client can install one
+        # without anyone at the Mac (AppUpdater.installForClient).
+        SUAutomaticallyUpdate: true
         LSUIElement: true                 # menu bar only, no Dock icon
         LSApplicationCategoryType: public.app-category.developer-tools
         # rad and the agents it starts run as this app's children, so macOS
@@ -154,7 +197,7 @@ targets:
         MARKETING_VERSION: "0.1"
         SWIFT_VERSION: "6.0"
         CODE_SIGN_STYLE: Automatic
-        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_HARDENED_RUNTIME: "$(HARDENED_RUNTIME_$(DEVELOPMENT_TEAM:default=WITHOUT_TEAM):default=YES)"
         ENABLE_USER_SCRIPT_SANDBOXING: NO   # build-rad.sh reads ../server and Go's cache
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
@@ -162,6 +205,9 @@ targets:
       - name: Build rad
         script: exec "$SRCROOT/scripts/build-rad.sh"
         basedOnDependencyAnalysis: false   # go build has its own cache
+      - name: Sign Sparkle
+        script: exec "$SRCROOT/scripts/sign-sparkle.sh"
+        basedOnDependencyAnalysis: false
 schemes:
   RemoteAgent-iOS:
     build:

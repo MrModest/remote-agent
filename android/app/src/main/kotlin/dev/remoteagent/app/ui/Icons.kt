@@ -35,11 +35,14 @@ object Icons {
     @DrawableRes val toolRead = R.drawable.sym_description // doc
     @DrawableRes val gemini = R.drawable.sym_diamond // diamond
     @DrawableRes val changes = R.drawable.sym_difference // plus.forwardslash.minus
+    @DrawableRes val serverSettings = R.drawable.sym_dns // server.rack
     @DrawableRes val save = R.drawable.sym_download // square.and.arrow.down
+    @DrawableRes val update = R.drawable.sym_download // arrow.down.circle
     @DrawableRes val toolEdit = R.drawable.sym_edit // pencil
     @DrawableRes val newSession = R.drawable.sym_edit_square // square.and.pencil
     @DrawableRes val expand = R.drawable.sym_expand_more // chevron.down
     @DrawableRes val folder = R.drawable.sym_folder // folder
+    @DrawableRes val forget = R.drawable.sym_folder_off // folder.badge.minus
     @DrawableRes val dictating = R.drawable.sym_graphic_eq // waveform
     @DrawableRes val toolThink = R.drawable.sym_group // person.2
     @DrawableRes val image = R.drawable.sym_image // photo
@@ -51,9 +54,11 @@ object Icons {
     @DrawableRes val keyTab = R.drawable.sym_keyboard_tab
     @DrawableRes val hideKeyboard = R.drawable.sym_keyboard_hide // keyboard.chevron.compact.down
     @DrawableRes val toolFetch = R.drawable.sym_language // globe
+    @DrawableRes val signIn = R.drawable.sym_login // person.badge.key
     @DrawableRes val cpu = R.drawable.sym_memory // cpu
     @DrawableRes val mic = R.drawable.sym_mic // mic
     @DrawableRes val more = R.drawable.sym_more_vert // ellipsis.circle
+    @DrawableRes val openPage = R.drawable.sym_open_in_new // safari
     @DrawableRes val approval = R.drawable.sym_pan_tool_fill // hand.raised.fill
     @DrawableRes val inProgress = R.drawable.sym_pending // circle.dotted
     @DrawableRes val photos = R.drawable.sym_photo_library // photo.on.rectangle

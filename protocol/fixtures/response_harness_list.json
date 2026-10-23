@@ -58,7 +58,10 @@
           "interrupt": true,
           "setMode": true,
           "freeModel": true,
-          "modelSelect": true
+          "modelSelect": true,
+          "update": true,
+          "login": true,
+          "oneShot": true
         }
       },
       {

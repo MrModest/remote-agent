@@ -78,6 +78,8 @@ struct FixtureTests {
         #expect(claude?.commands?.map(\.prompt) == ["/compact"])
         #expect(claude?.commands?.first?.description?.isEmpty == false)
         #expect(h.result?.harnesses[1].commands == nil)
+        #expect(claude?.caps.update == true && claude?.caps.login == true && claude?.caps.oneShot == true)
+        #expect(h.result?.harnesses[1].caps.update == nil)
 
         let d = try dec.decode(Response<Diff>.self, from: load("response_diff.json"))
         #expect(d.result?.files.map(\.status) == [.modified, .renamed, .added])
@@ -126,5 +128,27 @@ struct FixtureTests {
                 == "session=s1&cols=80&rows=24&create=1")
         #expect(q(TerminalSession.query(sessionID: "s1", cols: 100, rows: 30, create: false, shellID: "ab", offset: 4096))
                 == "session=s1&cols=100&rows=30&id=ab&offset=4096")
+    }
+
+    @Test func serverManagement() throws {
+        let dec = WireCoding.decoder()
+        let settings = try dec.decode(Response<ServerSettings>.self, from: load("response_server_settings.json"))
+        #expect(settings.result?.systemAgent == SystemAgent(harness: "claude", model: "haiku", effort: "low"))
+
+        let update = try #require(try dec.decode(Response<UpdateInfo>.self, from: load("response_check_update.json")).result)
+        #expect(update.current == "0.11.0" && update.latest == "0.12.0" && update.available && update.via == "app")
+        #expect(update.installable && update.busy == ["Fix the tests"] && update.reason == nil)
+
+        let task = try #require(try dec.decode(Response<ServerTask>.self, from: load("response_task.json")).result)
+        #expect(task.kind == .login && task.harness == "claude" && task.status == .running && task.isRunning)
+        #expect(task.input == true && task.url == "https://claude.com/cai/oauth/authorize?code=true")
+        #expect(task.output.hasSuffix("Paste code here if prompted >") && task.endedAt == nil)
+
+        struct Tasks: Decodable { var tasks: [ServerTask] }
+        let list = try #require(try dec.decode(Response<Tasks>.self, from: load("response_task_list.json")).result)
+        #expect(list.tasks.map(\.kind) == [.updateAgent, .updateServer])
+        #expect(list.tasks.map(\.status) == [.succeeded, .failed])
+        #expect(list.tasks[0].version == "0.164.0" && list.tasks[0].endedAt != nil)
+        #expect(list.tasks[1].error?.contains("checksum") == true && list.tasks[1].harness == nil)
     }
 }

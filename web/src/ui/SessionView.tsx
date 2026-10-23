@@ -38,7 +38,9 @@ import { storage } from "../store/storage";
 // xterm.js loads with the first terminal opened.
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 
-export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?: () => void }) {
+/** A session's messages and prompt. `onDeleted` is called once the session
+ *  is deleted, here or on another device. */
+export function SessionView({ sessionID, onBack, onDeleted }: { sessionID: string; onBack?: () => void; onDeleted?: () => void }) {
   const connection = useConnection();
   useObserved(connection);
   const store = useMemo(() => connection.sessionStore(sessionID), [connection, sessionID]);
@@ -62,6 +64,13 @@ export function SessionView({ sessionID, onBack }: { sessionID: string; onBack?:
   useEffect(() => {
     document.title = session?.title ? `${session.title} – Remote Agent` : "Remote Agent";
   }, [session?.title]);
+
+  // Its stream says so, or the index, once synced: before it, every
+  // session looks missing.
+  const deleted = store.removed || (connection.indexSynced && !connection.sessions.has(sessionID));
+  useEffect(() => {
+    if (deleted) onDeleted?.();
+  }, [deleted]);
 
   const run = async (f: () => Promise<unknown>) => {
     try {

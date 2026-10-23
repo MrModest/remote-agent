@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -313,4 +314,40 @@ func (r *runtime) applySetup(s *sessionSetup) {
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return lines[len(lines)-1]
+}
+
+// knownCommands are the update and login commands of the ACP agents rad
+// knows, by the name of their command.
+var knownCommands = map[string]struct{ update, login []string }{
+	"cursor-agent": {update: []string{"update"}, login: []string{"login"}},
+	"agent":        {update: []string{"update"}, login: []string{"login"}}, // Cursor's other name
+	"opencode":     {update: []string{"upgrade"}},
+}
+
+func (h *Harness) known() (update, login []string) {
+	k, ok := knownCommands[filepath.Base(h.agent.Command)]
+	if !ok {
+		return nil, nil
+	}
+	prefix := func(args []string) []string {
+		if args == nil {
+			return nil
+		}
+		return append([]string{h.agent.Command}, args...)
+	}
+	return prefix(k.update), prefix(k.login)
+}
+
+func (h *Harness) UpdateCommand() (harness.Command, bool) {
+	def, _ := h.known()
+	args, ok := harness.Configured(h.agent.Update, def)
+	return harness.Command{Args: args, Env: h.agent.Env}, ok
+}
+
+// LoginCommand: Cursor's prints a link and waits for the sign-in there, when
+// NO_OPEN_BROWSER keeps it from opening a browser itself.
+func (h *Harness) LoginCommand() (harness.Command, bool) {
+	_, def := h.known()
+	args, ok := harness.Configured(h.agent.Login, def)
+	return harness.Command{Args: args, Env: h.agent.Env}, ok
 }

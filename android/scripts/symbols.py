@@ -19,7 +19,7 @@ SYMBOLS = {
     "chevron_right": False, "circle": False, "close": False, "code": False, "compress": False,
     "computer": False, "contact_support": False, "content_copy": False, "content_paste": False,
     "data_object": False, "delete": False, "description": False, "diamond": False, "difference": False,
-    "download": False, "edit": False, "edit_square": False, "expand_more": False, "folder": False,
+    "download": False, "edit": False, "edit_square": False, "expand_more": False, "folder": False, "folder_off": False,
     "graphic_eq": False, "group": False, "image": False, "keyboard_arrow_down": False,
     "keyboard_arrow_left": False, "keyboard_arrow_right": False, "keyboard_arrow_up": False,
     "keyboard_tab": False, "language": False, "memory": False, "mic": False, "more_vert": False,
@@ -29,6 +29,7 @@ SYMBOLS = {
     "theater_comedy": False, "undo": False, "unfold_more": False, "arrow_selector_tool": False,
     "warning": True, "wifi_off": False, "wrap_text": False, "dangerous": False, "link": False,
     "keyboard_hide": False, "functions": False, "play_circle": False, "inbox": False,
+    "dns": False, "login": False, "open_in_new": False,
 }
 
 URL = "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/{name}/{style}/24px.svg"

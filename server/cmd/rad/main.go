@@ -5,16 +5,18 @@ package main
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,7 +34,9 @@ import (
 	"remote-agent/internal/netinfo"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/tasks"
 	"remote-agent/internal/terminal"
+	"remote-agent/internal/update"
 )
 
 const usage = `rad — remote agent server
@@ -50,9 +54,24 @@ Usage:
   rad version
 `
 
+// printUsage prints the usage, then where this rad's config and data are, as
+// RAD_HOME and the XDG variables place them.
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, usage)
+	configPath, dataDir, err := config.Paths()
+	if err != nil {
+		return
+	}
+	note := ""
+	if _, err := os.Stat(configPath); errors.Is(err, fs.ErrNotExist) {
+		note = " (not written yet: rad writes the default on first use)"
+	}
+	fmt.Fprintf(w, "\nFiles (RAD_HOME=<dir> puts both in <dir>):\n  config  %s%s\n  data    %s\n", configPath, note, dataDir)
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+		printUsage(os.Stderr)
 		os.Exit(2)
 	}
 	var err error
@@ -74,10 +93,14 @@ func main() {
 	case "version", "--version", "-v":
 		fmt.Println("rad", api.Version)
 	case "help", "-h", "--help":
-		fmt.Print(usage)
+		printUsage(os.Stdout)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		printUsage(os.Stderr)
 		os.Exit(2)
+	}
+	if r, ok := err.(*restartError); ok {
+		// After serve has let go of its lock, ports and database.
+		err = execRestart(r.exe)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rad:", err)
@@ -148,9 +171,9 @@ func serve(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	var status *json.Encoder
+	var app *supervisor
 	if *supervised {
-		ctx, status = supervise(ctx)
+		ctx, app = supervise(ctx)
 	}
 
 	reg := buildRegistry(cfg)
@@ -171,6 +194,20 @@ func serve(args []string) error {
 	srv.WebOrigins = cfg.WebOrigins
 	terms := terminal.NewManager(terminal.Options{Log: log})
 	srv.Terminals = terms
+	maint := tasks.NewManager(log)
+	srv.Tasks = maint
+	restart := make(chan struct{})
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err == nil {
+		srv.Updater = &selfUpdater{
+			client: update.Default(api.Version), st: st, exe: exe, app: app,
+			restart:   sync.OnceFunc(func() { close(restart) }),
+			appAnswer: 30 * time.Second, appInstall: 15 * time.Minute,
+		}
+	}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	errc := make(chan error, len(lns))
@@ -181,8 +218,8 @@ func serve(args []string) error {
 	log.Info("rad ready", "urls", netinfo.PairURLs(cfg), "config", cfg.ConfigPath, "data", cfg.DataDir, "roots", cfg.Roots)
 	devs, _ := st.Devices(ctx)
 	switch {
-	case status != nil:
-		status.Encode(readyStatus{Event: "ready", Version: api.Version, URLs: netinfo.PairURLs(cfg), Listen: addrs,
+	case app != nil:
+		app.Send(readyStatus{Event: "ready", Version: api.Version, URLs: netinfo.PairURLs(cfg), Listen: addrs,
 			Config: cfg.ConfigPath, Data: cfg.DataDir, PairedDevices: len(devs)})
 	case len(devs) == 0:
 		fmt.Fprintln(os.Stderr, "\nNo devices paired yet.")
@@ -190,19 +227,22 @@ func serve(args []string) error {
 	}
 	go func() { // after the QR code, so the log can't split it
 		infos := logAgents(ctx, log, reg)
-		if status != nil {
-			status.Encode(agentsStatus{Event: "agents", Agents: infos})
+		if app != nil {
+			app.Send(agentsStatus{Event: "agents", Agents: infos})
 		}
 	}()
 
+	restarting := false
 	select {
 	case <-ctx.Done():
+	case <-restart:
+		restarting = true
 	case err := <-errc:
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server error", "err", err)
 		}
 	}
-	log.Info("shutting down")
+	log.Info("shutting down", "restart", restarting)
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(sctx)
@@ -210,7 +250,11 @@ func serve(args []string) error {
 	var wg sync.WaitGroup
 	wg.Go(orch.Shutdown)
 	wg.Go(terms.Shutdown)
+	wg.Go(maint.Shutdown)
 	wg.Wait()
+	if restarting {
+		return &restartError{exe}
+	}
 	return nil
 }
 

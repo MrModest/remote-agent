@@ -57,14 +57,17 @@ import java.io.File
 
 private const val CUSTOM = "__custom"
 
-/** "New session". Mirrors apple/Shared/Views/NewSessionView.swift. */
+/**
+ * "New session", in `projectId` when given, else in the project used last.
+ * Mirrors apple/Shared/Views/NewSessionView.swift.
+ */
 @Composable
-fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCreated: (Session) -> Unit) {
+fun NewSessionDialog(connection: ServerConnection, projectId: String? = null, onDismiss: () -> Unit, onCreated: (Session) -> Unit) {
     val settings = LocalSettings.current
     val scope = rememberCoroutineScope()
     val projects by connection.projects.collectAsStateWithLifecycle()
     val harnesses by connection.harnesses.collectAsStateWithLifecycle()
-    var projectID by rememberSaveable { mutableStateOf("") }
+    var projectID by rememberSaveable { mutableStateOf(projectId ?: "") }
     var harnessID by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf("") }
     var customModel by rememberSaveable { mutableStateOf("") }
@@ -77,6 +80,8 @@ fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCrea
     var prompt by rememberSaveable { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Why the chosen project wasn't forgotten, beside its Forget button.
+    var forgetError by remember { mutableStateOf<String?>(null) }
     var browsing by remember { mutableStateOf(false) }
     val attachments = rememberAttachments(connection) { error = it }
 
@@ -128,6 +133,7 @@ fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCrea
         if (harness != null && harness.efforts(chosenModel).none { it.id == effort }) effort = ""
     }
     LaunchedEffect(projectID) {
+        forgetError = null
         branches = emptyList()
         if (project?.isGitRepo == true) branches = runCatching { connection.branches(projectID).branches }.getOrDefault(emptyList())
     }
@@ -168,6 +174,22 @@ fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCrea
         }
     }
 
+    // Takes the project off the server's list, which it refuses while the
+    // project has sessions that aren't archived.
+    fun forget(id: String) {
+        forgetError = null
+        scope.launch {
+            try {
+                connection.removeProject(id)
+                if (projectID == id) projectID = ""
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                forgetError = e.message
+            }
+        }
+    }
+
     FullScreenDialog(onDismiss) {
         Screen(
             title = { Text("New session", style = Type.headline) },
@@ -200,7 +222,24 @@ fun NewSessionDialog(connection: ServerConnection, onDismiss: () -> Unit, onCrea
                     }
                     project?.let {
                         FormDivider()
-                        Text(it.path, style = Type.caption.copy(fontFamily = FontFamily.Monospace), color = palette.subtext, modifier = Modifier.padding(12.dp))
+                        Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                it.path, style = Type.caption.copy(fontFamily = FontFamily.Monospace), color = palette.subtext,
+                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                            )
+                            TextButton({ forget(it.id) }, modifier = Modifier.testTag("forget-project")) {
+                                Text("Forget", color = palette.accent, style = Type.body)
+                            }
+                        }
+                        forgetError?.let { e ->
+                            Row(
+                                Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(painterResource(Icons.warning), null, tint = palette.red, modifier = Modifier.size(16.dp))
+                                Text(e, color = palette.red, style = Type.caption)
+                            }
+                        }
                     }
                 }
 

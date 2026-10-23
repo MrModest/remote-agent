@@ -1,14 +1,17 @@
 # Builds the web client's image (web/Dockerfile) for amd64 and arm64 and pushes
 # it to GitHub's container registry as ghcr.io/<owner>/remote-agent-web:
 # `edge` from main, and `latest` plus the version from a tag like v0.2.0.
-# Pull requests that touch web/ build it without pushing. (Path filters don't
-# work for tags, so pushes to main build it every time; the cache keeps that quick.)
+# It builds only when web/ changed. Pushes to main and pull requests filter on
+# paths, which include this file (pull requests build without pushing). Path
+# filters don't work for tags, so a tag compares web/ with the previous tag's,
+# and when nothing changed it puts its tags on the previous release's image.
 name: Web image
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths: ["web/**", ".github/workflows/web-image.yml"]
   pull_request:
     paths: ["web/**", ".github/workflows/web-image.yml"]
   workflow_dispatch:
@@ -26,6 +29,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the tags, to compare web/ with the previous release's
+      - id: previous
+        name: Find the previous release's image if web/ is unchanged
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' --exclude "$GITHUB_REF_NAME" HEAD) || exit 0
+          if git diff --quiet "$prev" HEAD -- web; then
+            echo "web/ is unchanged since $prev"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/remote-agent-web:${prev#v}" >> "$GITHUB_OUTPUT"
+          fi
       # The Dockerfile builds on the runner's platform and only copies files
       # into the nginx image, so no emulation is needed for arm64.
       - uses: docker/setup-buildx-action@v4
@@ -46,7 +60,21 @@ jobs:
             type=sha
           flavor: |
             latest=auto
+      # Keeps the previous image's labels. If that image is missing, the next
+      # step builds one.
+      - id: retag
+        name: Tag the previous release's image
+        if: steps.previous.outputs.image
+        continue-on-error: true
+        env:
+          SOURCE: ${{ steps.previous.outputs.image }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          args=()
+          for t in $TAGS; do args+=(-t "$t"); done
+          docker buildx imagetools create "${args[@]}" "$SOURCE"
       - uses: docker/build-push-action@v7
+        if: steps.retag.outcome != 'success'
         with:
           context: web
           platforms: linux/amd64,linux/arm64

@@ -30,6 +30,20 @@ private struct AgentsLine: Decodable {
     let agents: [AgentInfo]
 }
 
+/// rad asks for the app's latest release, for a client (server.update).
+private struct UpdateLine: Decodable {
+    let version: String?
+}
+
+/// A line for rad's stdin: how an update a client asked for goes.
+struct UpdateStatus: Encodable {
+    var event = "updateStatus"
+    /// checking, downloading, installing (the app quits next), upToDate or failed.
+    var status: String
+    var version: String?
+    var message: String?
+}
+
 /// Runs rad as this app's child, so macOS attributes rad and every agent it
 /// starts to this app when it asks for permissions. Restarts rad if it dies,
 /// and stops it when the app quits.
@@ -50,11 +64,9 @@ final class RadSupervisor {
     private(set) var agents: [AgentInfo]?
     /// The login-shell environment rad last started with.
     private(set) var environment = ProcessInfo.processInfo.environment
-    /// The rad binary that runs, or last ran, and its version (RadBinary).
-    private(set) var executable = RadBinary.bundled
-    private(set) var version = RadBinary.bundledVersion
-    /// Why rad went back to the bundled copy, after a download didn't start.
-    private(set) var note: String?
+    /// The rad binary that runs, and its version (RadBinary).
+    let executable = RadBinary.bundled
+    let version = RadBinary.bundledVersion
 
     let logURL: URL = {
         if let home = ProcessInfo.processInfo.environment["RAD_HOME"] {
@@ -75,8 +87,8 @@ final class RadSupervisor {
     @ObservationIgnored private var restartDelay: TimeInterval = 1
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var activity: NSObjectProtocol?
-    /// rad said it was ready since it was last launched.
-    @ObservationIgnored private var wasReady = false
+    /// Called when a client asks rad to update, with the version rad found.
+    @ObservationIgnored var onUpdateRequest: ((String?) -> Void)?
 
     /// rad or a start is under way.
     var isActive: Bool { process != nil || launching }
@@ -87,7 +99,6 @@ final class RadSupervisor {
         launching = true
         state = .starting
         environment = await LoginShell.environment()
-        (executable, version) = RadBinary.choose()
         launching = false
         launch()
     }
@@ -112,7 +123,6 @@ final class RadSupervisor {
     }
 
     func restart() {
-        note = nil
         stop { Task { await self.start() } }
     }
 
@@ -138,7 +148,6 @@ final class RadSupervisor {
         process = p
         self.lifeline = lifeline
         startedAt = Date()
-        wasReady = false
         activity = ProcessInfo.processInfo.beginActivity(
             options: .userInitiatedAllowingIdleSystemSleep, reason: "rad is serving agents")
     }
@@ -149,12 +158,20 @@ final class RadSupervisor {
         case "ready":
             ready = try? JSONDecoder().decode(ReadyStatus.self, from: line)
             state = .running
-            wasReady = true
         case "agents":
             agents = (try? JSONDecoder().decode(AgentsLine.self, from: line))?.agents
+        case "update":
+            onUpdateRequest?((try? JSONDecoder().decode(UpdateLine.self, from: line))?.version)
         default:
             break
         }
+    }
+
+    /// Tells rad how its update goes, on its stdin.
+    func send(_ status: UpdateStatus) {
+        guard let lifeline, var line = try? JSONEncoder().encode(status) else { return }
+        line.append(UInt8(ascii: "\n"))
+        try? lifeline.fileHandleForWriting.write(contentsOf: line)
     }
 
     private func exited(_ status: Int32, _ reason: Process.TerminationReason) {
@@ -178,13 +195,6 @@ final class RadSupervisor {
             return
         }
         state = .failed(message)
-        if executable != RadBinary.bundled && !wasReady {
-            // A downloaded rad that never got going goes, rather than
-            // failing again and again; the bundled one takes over.
-            note = "rad \(version) didn't start (\(message)), so the app went back to rad \(RadBinary.bundledVersion)."
-            RadBinary.discard(executable)
-            restartDelay = 1
-        }
         if Date().timeIntervalSince(startedAt) > 60 { restartDelay = 1 }
         let delay = restartDelay
         restartDelay = min(restartDelay * 2, 60)

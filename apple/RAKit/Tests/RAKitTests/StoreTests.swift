@@ -61,6 +61,17 @@ struct SessionStoreTests {
         #expect(s.items["x"] == nil)
     }
 
+    @Test func removalEmptiesTheStore() throws {
+        let s = SessionStore._testMake("s")
+        s._testSynchronized(seq: 1, reset: true)
+        s._testApply([try event(2, item: "a", order: 1, text: "first")])
+        #expect(!s.removed)
+        let data = Data(#"{"stream": "session:s", "seq": 3, "type": "session.removed", "id": "s", "ts": "2026-10-09T12:00:00Z"}"#.utf8)
+        s._testApply([try WireCoding.decoder().decode(Event.self, from: data)])
+        #expect(s.removed)
+        #expect(s.session == nil && s.transcript.isEmpty && s.items.isEmpty)
+    }
+
     @Test func childrenNestUnderParent() throws {
         let s = SessionStore._testMake("s")
         s._testApply([try event(1, item: "tool", order: 1, text: "", kind: "notice"),

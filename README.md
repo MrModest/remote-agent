@@ -11,6 +11,7 @@ Drive coding agents running on your computer from your iPhone, iPad, Mac, an And
   - approve or deny tool calls
   - answer the agent's questions
   - review per-turn git diffs and revert them
+  - update rad and the agents, and sign an agent in again, without going to the computer
   - get a notification on the Mac when a session needs you or finishes
 - **Web client**: the same app for a browser, in `web/` (React and TypeScript). In a wide window it has the iPad's sidebar of every server's sessions. For now you run it from its dev server on your computer; see [Running the web client](#running-the-web-client).
 - **Android app**: the same app, native, for Android 16 or later, in `android/` (Kotlin and Jetpack Compose). On a tablet, as on iPad, one sidebar lists every server's sessions next to the one you have open. See [Installing the app on Android](#installing-the-app-on-android).
@@ -96,7 +97,8 @@ rad update             # install it
 - **As the background service:** if `install-service` set up this binary, the service is restarted and `rad update` waits for the new version to answer. A restart interrupts running turns, so while any session is busy (a turn running, or an approval waiting) it stops before downloading and names them. Pass `--now` to go ahead anyway.
 - **In a terminal:** restart `rad serve` yourself.
 - **Development builds:** a build from source (`rad version` says `dev`) isn't replaced without `--force`.
-- **Remote Agent Server app:** update its rad from the app's menu, below.
+- **Remote Agent Server app:** the app updates itself, and its rad, from its menu, below.
+- **From the apps:** a server's **Server Settings…** updates rad too (see [Managing a server from the apps](#managing-a-server-from-the-apps)).
 
 ## Running rad as a Mac app
 
@@ -111,8 +113,8 @@ rad update             # install it
 
    Run it from one place only: macOS treats each copy separately and can list both in System Settings.
 
-   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). That build is signed ad hoc and not notarized, so macOS blocks its first launch. Allow it under System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Remote Agent Server.app"`.
-2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, macOS forgets the app's permissions every time you rebuild it, or install a new release.
+   Or, on Apple silicon, download `Remote-Agent-Server-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). It is signed with Developer ID and notarized, updates itself, and keeps its permissions across updates. Drag it into Applications on its own, not together with the client app: macOS runs apps dragged in together from a temporary copy, which can't update itself. If the app says it can't be updated, quit it and run `xattr -dr com.apple.quarantine "/Applications/Remote Agent Server.app"`.
+2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, macOS forgets the app's permissions every time you rebuild it.
 3. Open it. It runs rad with your usual config and opens **Permissions** the first time:
    - **Desktop, Documents and Downloads:** macOS asks once for each folder. **Full Disk Access** covers them and everything else, and is switched on in System Settings.
    - **Accessibility, Screen Recording and Automation of System Events:** for agents that click, type, take screenshots or run AppleScript. Other apps ask the first time an agent scripts them.
@@ -125,14 +127,14 @@ The menu shows whether rad is running, its addresses and the agents it found:
 - **Pair a Device…** shows the pairing QR code.
 - **Start at Login** replaces `rad install-service`. If that service is installed, the menu offers to remove it, since only one rad can serve a config at a time.
 - **Open Log** opens `~/Library/Logs/Remote Agent Server/rad.log`.
-- **Update rad to …** appears when a newer release is out; the app checks once a day, or when you choose **Check for Updates…**.
-  - The app downloads the new rad to `~/Library/Application Support/Remote Agent Server/` and restarts rad from there. It asks first if that would interrupt a session.
-  - The app itself doesn't change, so macOS keeps its permissions, and they cover the new rad too.
-  - When you later install a newer app, its own rad takes over and the download is deleted. A download that fails to start is deleted too, and the app goes back to its own rad.
-  - Builds from Xcode (version `0.1`) always run the rad built with them, and offer no updates.
+- **Check for Updates…**: the app updates itself, with the rad inside it, from this repository's releases. It checks once a day and downloads a newer release by itself; the menu then offers **Install … and Restart…**, and otherwise it installs when you quit the app. **Check for Updates…** shows what's new and installs it.
+  - Installing restarts the app, and so rad. If that would interrupt a session, the app asks first. Choose **Later**, and the update installs when you quit the app, or when you choose **Install … and Restart…**.
+  - **Server Settings…** in the apps installs it from your phone: rad asks the app, which installs without asking, as you aren't at the Mac. The apps warn you first about sessions it would interrupt.
+  - Each release is signed like the last, so macOS keeps the app's permissions.
+  - Builds from Xcode (version `0.1`) offer no updates.
 - Quitting the app stops rad and its agents.
 
-The `rad` CLI keeps working next to the app (`rad pair`, `rad devices`); the app's copy is `/Applications/Remote Agent Server.app/Contents/MacOS/rad`, or after an update the `rad-<version>` it downloaded.
+The `rad` CLI keeps working next to the app (`rad pair`, `rad devices`); the app's copy is `/Applications/Remote Agent Server.app/Contents/MacOS/rad`.
 
 ## Installing the app on an iPhone or iPad
 
@@ -189,8 +191,8 @@ The Mac app is built from the same code as the iPhone app, as its own target, **
 
    Or open `apple/RemoteAgent.xcodeproj`, pick the **RemoteAgent-macOS** scheme and press ⌘R.
 
-   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed ad hoc and not notarized, so allow its first launch under System Settings › Privacy & Security.
-2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build or release read the pairing tokens it saved in your keychain.
+   Or download `Remote-Agent-macOS-arm64.zip` from [Releases](https://github.com/buldezir/remote-agent/releases). Like the Server app's release build, it is signed with Developer ID and notarized, and updates itself: **Remote Agent › Check for Updates…**, and once a day unless you turn that off in Settings › Updates. As with the Server app, drag it into Applications on its own; if it says it can't be updated, quit it and run `xattr -dr com.apple.quarantine "/Applications/Remote Agent.app"`.
+2. Signing uses the team saved in `apple/Local.xcconfig` (step 3 for the iPhone). Without one, the app is signed to run on this Mac only. That works, but macOS may ask you to let each new build read the pairing tokens it saved in your keychain.
 3. Pair it: run `server/bin/rad pair`, then paste the link in **File › Pair a Server…**. When rad runs on the same Mac, `open "$(server/bin/rad pair --print-url)"` opens the link in the app.
 
 On the Mac, ⌘N starts a session on the server of the one you have open; the arrow beside the New Session button, or the + beside a server's name, starts one on another server. In the composer, Return sends, ⇧Return or ⌥Return starts a new line and ⌘. stops the agent. ⌘V pastes an image you copied, and you can drop image files on the session. The sidebar lists every paired server with its sessions, those waiting for you first. Click a server's name to hide or show its sessions; right-click it to reconnect or remove it. The app has one window, which opens again on the session you had open last. Dictation listens in your preferred languages from System Settings.
@@ -234,7 +236,7 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
 - **Composer:** Return sends, ⇧Return starts a new line, and ⌘. or Ctrl+. stops the agent. You can paste or drop images. Dictation uses the browser's speech recognizer where it has one (Chrome, Edge, Safari).
 - **Sidebar:** in a wide window it lists every paired server with its sessions, those waiting for you first. Click a server's name to hide or show its sessions; the page remembers which you hid. Hover the name for + (a new session on that server) and ⋯ (reconnect, rename or remove it).
 - `npm run build` writes a static site to `web/dist`, which any web server can serve.
-- **Docker:** `web/Dockerfile` serves the client with nginx on port 8080, and `web/compose.example.yaml` runs it. [`.github/workflows/web-image.yml`](.github/workflows/web-image.yml) pushes the image to `ghcr.io/buldezir/remote-agent-web`: `edge` from main, `latest` and the version from a `v*` tag. Add the address you open it at to rad's `web_origins`, such as `"my-server.local:8080"`, then pair with `rad pair --web http://my-server.local:8080`.
+- **Docker:** `web/Dockerfile` serves the client with nginx on port 8080, and `web/compose.example.yaml` runs it. [`.github/workflows/web-image.yml`](.github/workflows/web-image.yml) pushes the image to `ghcr.io/buldezir/remote-agent-web`: `edge` from main, `latest` and the version from a `v*` tag. It builds only when `web/` changed: a tag that leaves `web/` as it was puts its tags on the previous release's image. Add the address you open it at to rad's `web_origins`, such as `"my-server.local:8080"`, then pair with `rad pair --web http://my-server.local:8080`.
 
 ## Using it
 
@@ -259,7 +261,7 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
   - Typing `/compact` as a prompt does the same, and `/compact <instructions>` tells Claude Code or Pi what the summary should keep; Codex takes no instructions for it.
   - Claude Code runs it itself. rad runs it with Codex's and Pi's own compaction, since they don't take `/compact` in a prompt.
 - **Terminal:** a session's ⋯ menu opens a shell on your computer, in the session's folder (its worktree, for a worktree session). It's your login shell, in a real terminal, so `git`, `vim`, `htop` and the agents' CLIs work as they do at the computer.
-  - The shell keeps running when you close the terminal, switch apps or lose the connection, and reopening it picks up where it was: rad keeps its last 256 KiB of output. It ends when you `exit` it or choose *Close Shell*, when the session is archived, or when rad stops. Each session has one shell, shared by all your devices.
+  - The shell keeps running when you close the terminal, switch apps or lose the connection, and reopening it picks up where it was: rad keeps its last 256 KiB of output. It ends when you `exit` it or choose *Close Shell*, when the session is archived or deleted, or when rad stops. Each session has one shell, shared by all your devices.
   - On the Mac, iPad and the web client in a wide window, Settings › Terminal picks where it opens: instead of the messages, below them, or in a sidebar on the right. On an iPhone, or in a narrow window, it takes the place of the messages.
   - ⌘J or ⌘` shows and hides it, with a keyboard on iPad too; hiding it puts you back in the prompt. In the web client Ctrl works as well, except inside the terminal, where Ctrl+J and Ctrl+` go to the shell.
   - On iPhone and iPad, the bar above the keyboard has Esc, Ctrl, Tab and the arrow keys; the web client shows similar keys on touch screens.
@@ -272,7 +274,21 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
 - **Queued prompts:** a prompt sent while the agent works waits, marked *Queued*, and goes out when the turn ends. *Send now* under it stops the turn and sends that prompt at once, ahead of any others waiting. Stop cancels them all.
 - **Text size:** Settings has two sizes: one for the interface, such as lists and labels, and one for messages: your prompts, the agent's replies and its tool calls. On the Mac it is under Remote Agent › Settings… (⌘,). On iPhone, tap the gear on the server list or open a server's ⋯ menu; on iPad, open the ⋯ menu above the sidebar. On iOS the interface follows the system's text size until you turn off **Match System**.
   - On the Mac, Settings also picks the messages' font, from the system font's designs or any installed family, and a code font from the installed fixed-width ones. The code font is used for code in messages, tool calls and diffs.
+- **Server Settings:** see [Managing a server from the apps](#managing-a-server-from-the-apps).
 - **Colours:** the apps use [Catppuccin](https://catppuccin.com): Frappé in dark mode, Latte in light mode, with mauve as the accent. They follow the system's appearance, or Settings › Theme keeps them light or dark.
+
+## Managing a server from the apps
+
+A server's menu has **Server Settings…**: in the sidebar, a server's ⋯ or right-click menu; on iPhone and Android phones, the ⋯ menu of its list of sessions.
+
+- **rad:** its version, and whether a newer release is out. **Update to …** installs it, and rad restarts: in place, as the same process (so a background service carries on), or, under the Remote Agent Server app, with the app. The apps reconnect by themselves. A restart interrupts the turns that run, so the apps say which sessions are busy and ask first.
+  - A development build, or a rad that can't replace its own binary (in a folder that isn't yours, or inside an app bundle without the app), says so instead.
+- **Agents:** each one's version, and whether it's signed in. **Update** runs the agent's own updater on the computer (`claude update`, `codex update`, `pi update`, `cursor-agent update`, `opencode upgrade`) and shows what it printed.
+  - **Sign In** shows when an agent isn't signed in, and **Sign In Again** in its ⋯ menu otherwise. It runs the agent's sign-in on the computer (`claude auth login`, `codex login --device-auth`, `cursor-agent login`) without opening a browser there, and shows its sign-in page as a button: open it on your phone. Claude's page then gives you a code to paste back in the app; Codex shows a code to enter on its page; Cursor needs nothing more.
+  - rad can't always tell that a login expired. When a turn fails because the agent isn't signed in, the agent shows as signed out until it signs in again or a turn of its works.
+  - `update` and `login` in the config replace these commands, or add them for an agent without one (see [Configuration](#configuration)).
+- **System Agent:** the agent and model that name new sessions. From the first prompt, it gives the session a short title and its worktree a branch name such as `ra/fix-login-redirect`, a few seconds after the session starts with names taken from the prompt. A title or branch you chose is kept. Pick a small, fast model, such as Claude's Haiku. With **None**, a session's title is its prompt's first line.
+  - The calls leave nothing with the agent: no session, no history, no tools. Claude Code runs `claude -p --no-session-persistence --safe-mode --tools ""`, Codex `codex exec --ephemeral` in a read-only sandbox, and Pi `pi --print --no-session --no-tools`, each in an empty folder that rad removes afterwards. ACP agents can't be the system agent, as ACP has no such call.
 
 ## CLI
 
@@ -314,6 +330,8 @@ harness:
   codex: {command: codex}
   pi: {command: pi}             # e.g. args: [-e, /path/to/extension.ts] to load an extension
 ```
+
+Each agent, built in or ACP, also takes `update` and `login`: the commands the apps run to update it and to sign it in again, such as `update: [npm, i, -g, "@google/gemini-cli@latest"]`. They replace the built-in ones; `[]` turns one off. Cursor and OpenCode have them built in, as `command` names them.
 
 Unknown keys are errors, so a typo stops rad with the line number rather than being ignored.
 
@@ -381,10 +399,14 @@ To exercise the UI without spending tokens, run `rad serve --fake` and pick **Fa
 - `fail`: makes the turn fail
 - `screenshot`: runs a tool that returns an image
 - `picture`: writes `picture-<turn>.png` in the working directory and shows it in the reply, as agents are told to
+- `markdown`: adds Markdown to the reply: a heading, lists, a task list, a code block, a quote and a table
 - `background [duration]`: leaves a task running in the background (5s by default, or for example `background 1m`), then starts a turn of its own to report on it
+- `logout`: fails the turn as an agent whose login expired does, so Server Settings shows Fake as signed out
 - `/compact`: marks the transcript with *Context compacted* and reports less context in use
 
 It also says how many images came with a prompt. `rad debug run --image shot.png "…"` attaches one from the command line.
+
+In Server Settings, Fake's **Update** prints a progress line and finishes in a second, and its **Sign In** shows a link and asks for a code: any code signs it in. As the system agent, it names a session "Named: " and the prompt's first words.
 
 To release, push a tag such as `v0.2.0`. [`.github/workflows/release.yml`](.github/workflows/release.yml) runs the server tests, builds rad for Linux and macOS, both Mac apps for Apple silicon and the Android app, and publishes them as that tag's release with a `SHA256SUMS` file. A tag with a hyphen, such as `v0.3.0-beta.1`, becomes a prerelease.
 
@@ -397,5 +419,35 @@ gh secret set ANDROID_KEYSTORE_PASSWORD
 gh secret set ANDROID_KEY_ALIAS      # remote-agent
 gh secret set ANDROID_KEY_PASSWORD
 ```
+
+The Mac apps are signed with a Developer ID Application certificate and notarized, which takes a paid Apple Developer account. Create the certificate in Xcode › Settings › Accounts › Manage Certificates, export it from Keychain Access as a `.p12`, and make an App Store Connect API key (Users and Access › Integrations › Team Keys, with Developer access) for the notary service:
+
+```bash
+base64 -i DeveloperID.p12 | gh secret set MACOS_CERTIFICATE_P12_BASE64
+gh secret set MACOS_CERTIFICATE_PASSWORD
+gh secret set APPLE_TEAM_ID              # from developer.apple.com › Membership details
+base64 -i AuthKey_<KEYID>.p8 | gh secret set NOTARY_API_KEY_BASE64
+gh secret set NOTARY_API_KEY_ID
+gh secret set NOTARY_API_ISSUER_ID
+```
+
+The Mac apps update themselves with [Sparkle](https://sparkle-project.org). Each release carries a feed for each app (`Remote-Agent-macOS-appcast.xml`, `Remote-Agent-Server-macOS-appcast.xml`) that says where its zip is, signed with an EdDSA key. The apps install only updates signed with that key, so make it once and keep a backup of the private half; its public half is `SPARKLE_PUBLIC_KEY` in `apple/project.yml`.
+
+```bash
+mkdir -p ~/sparkle && curl -fsSL https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz | tar -xf - -C ~/sparkle
+~/sparkle/bin/generate_keys --account remote-agent         # prints the public key
+~/sparkle/bin/generate_keys --account remote-agent -x ~/sparkle/private-key
+gh secret set SPARKLE_PRIVATE_KEY < ~/sparkle/private-key
+```
+
+To try the updates before a release, run the workflow by hand with a version, such as `0.10.0-test.1`: its Mac apps then offer and take updates, like a release's.
+
+The iPhone and iPad app goes to TestFlight from a Mac where Xcode › Settings › Accounts has an Apple ID on the team in `apple/Local.xcconfig`, after its app record exists in App Store Connect (bundle ID `dev.remote-agent.app`):
+
+```bash
+apple/scripts/testflight.sh 0.11.0      # or 0.11.0-beta.1, which goes up as 0.11.0 build 110001
+```
+
+It archives the app and uploads it; Xcode signs it with the team's Apple Distribution certificate, making it the first time. App Store Connect takes each build number once, so each version or beta goes up once.
 
 The raw protocol frames for each session are logged to `<data>/logs/<sessionId>.ndjson`.

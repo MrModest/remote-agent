@@ -14,6 +14,7 @@ import dev.remoteagent.core.store.SavedServer
 import dev.remoteagent.core.store.ServerConnection
 import dev.remoteagent.core.store.activeSessions
 import dev.remoteagent.core.store.archivedSessions
+import dev.remoteagent.core.store.sortedProjects
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -41,10 +42,16 @@ enum class SidebarLayout(val stored: String, val title: String, val summary: Str
  * dialogs for every layout.
  */
 class SessionActions(
-    val newSession: (ServerConnection) -> Unit = {},
-    val archive: (ArchiveRequest) -> Unit = {},
+    val startSession: (ServerConnection, projectId: String?) -> Unit = { _, _ -> },
+    val archive: (SessionRequest) -> Unit = {},
+    val delete: (SessionRequest) -> Unit = {},
     val remove: (SavedServer) -> Unit = {},
-)
+    /** Opens the server's settings: its updates, agents and system agent. */
+    val serverSettings: (ServerConnection) -> Unit = {},
+) {
+    /** A new session on the server, in one of its projects when given. */
+    fun newSession(connection: ServerConnection, projectId: String? = null) = startSession(connection, projectId)
+}
 
 val LocalSessionActions = staticCompositionLocalOf { SessionActions() }
 
@@ -103,6 +110,23 @@ val Session.needsYou: Boolean
 val Session.isBusy: Boolean
     get() = status == SessionStatus.RUNNING || (status == SessionStatus.IDLE && backgroundTasks.isNotEmpty())
 
+/**
+ * How much the session asks for a look: an answer it waits for, then a
+ * failure, then work, then work left in the background. Idle and stopped
+ * sessions ask nothing.
+ */
+val Session.urgency: Int
+    get() = when (status) {
+        SessionStatus.AWAITING_APPROVAL -> 4
+        SessionStatus.ERROR -> 3
+        SessionStatus.RUNNING -> 2
+        SessionStatus.IDLE -> if (backgroundTasks.isNotEmpty()) 1 else 0
+        else -> 0
+    }
+
+/** The session whose state a project's row shows for all of them: the one that asks most, if any does. */
+fun List<Session>.mostPressing(): Session? = filter { it.urgency > 0 }.maxByOrNull { it.urgency }
+
 /** Every server's sessions, the latest first. */
 fun List<ServerState>.sessions(archived: Boolean): List<ServerSession> =
     flatMap { s -> (if (archived) s.archived else s.active).map { ServerSession(s, it) } }
@@ -128,15 +152,18 @@ fun inboxGroups(active: List<ServerSession>): InboxGroups {
 class ProjectGroup(val projectId: String, val name: String, val items: List<ServerSession>)
 
 /**
- * The server's projects with sessions, the one worked in last first; in
- * each, what needs you, then the latest.
+ * The server's projects: those with sessions, the one worked in last first,
+ * then the others by name. In each, what needs you, then the latest.
  */
-fun projectGroups(server: ServerState): List<ProjectGroup> =
+fun projectGroups(server: ServerState): List<ProjectGroup> {
     // groupBy keeps the order each project first appears in: its latest session's.
-    server.active.groupBy { it.projectId }.map { (id, sessions) ->
+    val worked = server.active.groupBy { it.projectId }.map { (id, sessions) ->
         val items = sessions.map { ServerSession(server, it) }
         ProjectGroup(id, server.projects[id]?.name ?: "Project", items.filter { it.session.needsYou } + items.filter { !it.session.needsYou })
     }
+    val ids = worked.map { it.projectId }.toSet()
+    return worked + server.projects.sortedProjects.filter { it.id !in ids }.map { ProjectGroup(it.id, it.name, emptyList()) }
+}
 
 /** Ids separated by spaces, as the sidebars keep what they hide: [id] added or taken out. */
 fun toggled(stored: String, id: String, present: Boolean): String {

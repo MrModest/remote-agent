@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"remote-agent/internal/config"
@@ -205,6 +206,30 @@ func TestValueParam(t *testing.T) {
 	} {
 		if got := valueParam(v, "effort", "reasoning_effort"); got != want {
 			t.Errorf("valueParam(%q) = %q, want %q", v, got, want)
+		}
+	}
+}
+
+func TestMaintenanceCommands(t *testing.T) {
+	for _, tc := range []struct {
+		agent         config.ACPAgent
+		update, login string
+	}{
+		{config.ACPAgent{ID: "cursor", Command: "cursor-agent"}, "cursor-agent update", "cursor-agent login"},
+		{config.ACPAgent{ID: "cursor", Command: "/home/me/.local/bin/agent"}, "/home/me/.local/bin/agent update", "/home/me/.local/bin/agent login"},
+		{config.ACPAgent{ID: "opencode", Command: "opencode"}, "opencode upgrade", ""},
+		{config.ACPAgent{ID: "gemini", Command: "gemini"}, "", ""},
+		{config.ACPAgent{ID: "gemini", Command: "gemini", Update: []string{"npm", "i", "-g", "@google/gemini-cli"}}, "npm i -g @google/gemini-cli", ""},
+		{config.ACPAgent{ID: "cursor", Command: "cursor-agent", Login: []string{}}, "cursor-agent update", ""},
+	} {
+		h := New(tc.agent)
+		u, ok := h.UpdateCommand()
+		if got := strings.Join(u.Args, " "); got != tc.update || ok != (tc.update != "") {
+			t.Errorf("%s: update %q %v, want %q", tc.agent.Command, got, ok, tc.update)
+		}
+		l, ok := h.LoginCommand()
+		if got := strings.Join(l.Args, " "); got != tc.login || ok != (tc.login != "") {
+			t.Errorf("%s: login %q %v, want %q", tc.agent.Command, got, ok, tc.login)
 		}
 	}
 }

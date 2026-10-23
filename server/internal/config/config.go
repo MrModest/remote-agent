@@ -29,6 +29,10 @@ type Command struct {
 	Command string            `yaml:"command,omitempty"`
 	Args    []string          `yaml:"args,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
+	// Update and Login replace the commands the apps run to update the
+	// agent and to sign it in again; [] turns one off.
+	Update []string `yaml:"update,omitempty"`
+	Login  []string `yaml:"login,omitempty"`
 }
 
 // DefaultWebOrigins lets pages served from this machine, such as the web
@@ -41,6 +45,9 @@ type ACPAgent struct {
 	Command string            `yaml:"command"`
 	Args    []string          `yaml:"args,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
+	// As in Command. Cursor and OpenCode have defaults.
+	Update []string `yaml:"update,omitempty"`
+	Login  []string `yaml:"login,omitempty"`
 }
 
 type Config struct {
@@ -119,7 +126,9 @@ acp:
   - {id: gemini,   name: Gemini,   command: gemini,       args: [--acp]}
   - {id: omp,      name: Oh My Pi, command: omp,          args: [acp]}
 
-# Commands for the built-in harnesses; each also takes args and env.
+# Commands for the built-in harnesses; each also takes args and env, and
+# update and login, the commands the apps run to update the agent and sign
+# it in again (e.g. update: [npm, i, -g, "@openai/codex@latest"]).
 harness:
   claude: {command: claude}
   codex: {command: codex}

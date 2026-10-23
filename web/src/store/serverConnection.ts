@@ -1,10 +1,22 @@
-import type { Event, FSListing, HarnessInfo, ImageRef, Project, ServerInfo, Session } from "../protocol/models";
+import type {
+  Event,
+  FSListing,
+  HarnessInfo,
+  ImageRef,
+  Project,
+  ServerInfo,
+  ServerSettings,
+  ServerTask,
+  Session,
+  UpdateInfo,
+} from "../protocol/models";
 import { parseDate } from "../protocol/models";
 import { RPCClient, RPCError, type ServerMessage } from "../protocol/rpc";
 import { Drafts } from "./drafts";
 import { imageCache } from "./imageCache";
 import { Observable } from "./observable";
 import type { SavedServer } from "./serverStore";
+import type { TaskSource } from "./serverTask";
 import { SessionStore, type SessionHost } from "./sessionStore";
 import { TerminalSession } from "./terminalSession";
 
@@ -34,7 +46,7 @@ export interface NewSession {
  *  a row: `failed` until `start()` or `retry()`. A socket that has been
  *  silent for `heartbeat` is pinged, and dropped if it doesn't answer, so
  *  one that died while the computer slept doesn't pass for connected. */
-export class ServerConnection extends Observable implements SessionHost {
+export class ServerConnection extends Observable implements SessionHost, TaskSource {
   /** Failed attempts in a row before the connection gives up. */
   static readonly maxAttempts = 5;
   state: ConnectionState = { kind: "idle" };
@@ -472,6 +484,79 @@ export class ServerConnection extends Observable implements SessionHost {
     await this.client.call("session.archive", { sessionId, removeWorktree });
   }
 
+  /** Deletes a session and its transcript for good; the index then drops it. */
+  async deleteSession(sessionId: string, removeWorktree: boolean) {
+    await this.client.call("session.delete", { sessionId, removeWorktree });
+  }
+
+  // Managing the server
+
+  settings(): Promise<ServerSettings> {
+    return this.client.call("server.settings");
+  }
+
+  /** Replaces the server's settings (leave `systemAgent` out to unset it);
+   *  returns them as the server keeps them. */
+  setSettings(s: ServerSettings): Promise<ServerSettings> {
+    return this.client.call("server.setSettings", s);
+  }
+
+  /** Whether rad has an update; `refresh` asks GitHub again rather than use
+   *  the answer of the last few minutes. */
+  async checkUpdate(refresh = false): Promise<UpdateInfo> {
+    const r = await this.client.call<UpdateInfo>("server.checkUpdate", { refresh }, 45);
+    return { ...r, available: !!r.available, busy: r.busy ?? [] };
+  }
+
+  /** Installs rad's latest release, which restarts it. It looks the release up again first. */
+  async updateServer(): Promise<ServerTask> {
+    return task(await this.client.call<ServerTask>("server.update", undefined, 45));
+  }
+
+  /** Runs the agent's own updater. */
+  async updateHarness(id: string): Promise<ServerTask> {
+    return task(await this.client.call<ServerTask>("harness.update", { harness: id }));
+  }
+
+  /** Runs the agent's sign-in command. */
+  async loginHarness(id: string): Promise<ServerTask> {
+    return task(await this.client.call<ServerTask>("harness.login", { harness: id }));
+  }
+
+  async task(id: string): Promise<ServerTask> {
+    return task(await this.client.call<ServerTask>("task.get", { id }));
+  }
+
+  /** The tasks that run on the server, and those that ended lately, oldest first. */
+  async tasks(): Promise<ServerTask[]> {
+    const r = await this.client.call<{ tasks?: ServerTask[] }>("task.list");
+    return (r.tasks ?? []).map(task);
+  }
+
+  /** Types a line into the task's command, such as a code to paste. */
+  async taskInput(id: string, text: string) {
+    await this.client.call("task.input", { id, text });
+  }
+
+  async cancelTask(id: string) {
+    await this.client.call("task.cancel", { id });
+  }
+
+  /** The version of rad last connected to. */
+  get serverVersion(): string | undefined {
+    return this.info?.version;
+  }
+
+  /** An agent's update or sign-in ended: its version and sign-in state may have changed. */
+  async taskEnded() {
+    await this.refreshHarnesses(true);
+  }
+
+  /** rad may take longer to restart than the connection keeps trying. */
+  reviveConnection() {
+    if (this.state.kind === "failed") this.retry();
+  }
+
   // Derived
 
   get activeSessions(): Session[] {
@@ -485,6 +570,11 @@ export class ServerConnection extends Observable implements SessionHost {
   get sortedProjects(): Project[] {
     return [...this.projects.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }
+}
+
+/** A task as the server sent it, with `output` there even if it wasn't. */
+function task(t: ServerTask): ServerTask {
+  return { ...t, output: t.output ?? "" };
 }
 
 function byUpdated(a: Session, b: Session): number {

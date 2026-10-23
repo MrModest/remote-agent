@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The Projects layout: each server a section, its projects folding open to
 /// their sessions, a line each, what needs you first. The projects come in
-/// order of their latest session; a server's archived sessions fold up last.
+/// order of their latest session, those without any by name after them; a
+/// server's archived sessions fold up last.
 struct ProjectsSidebar: View {
     @Environment(ServerStore.self) private var store
     @Binding var selection: SessionRoute?
@@ -25,13 +26,22 @@ struct ProjectsSidebar: View {
                     ConnectionStatusRow(connection: c)
                     ForEach(groups(c), id: \.projectID) { group in
                         let open = projectExpanded(c.server.id, group.projectID)
-                        DisclosureGroup(isExpanded: open) {
-                            rows(group.items)
-                        } label: {
-                            ProjectLabel(name: group.name, count: group.items.count,
-                                         waiting: !open.wrappedValue && group.items.contains(where: \.session.needsYou))
+                        let label = ProjectLabel(name: group.name, count: group.items.count,
+                                                 status: group.items.map(\.session).mostPressing)
+                            // The whole row, past the name, takes a right-click.
+                            .contentShape(Rectangle())
+                            .contextMenu { ProjectMenuItems(connection: c, projectID: group.projectID) }
+                        if group.items.isEmpty {
+                            // Nothing to fold open.
+                            label.paletteRows(Palette.mantle)
+                        } else {
+                            DisclosureGroup(isExpanded: open) {
+                                rows(group.items)
+                            } label: {
+                                label
+                            }
+                            .paletteRows(Palette.mantle)
                         }
-                        .paletteRows(Palette.mantle)
                     }
                     let archived = c.archivedSessions.map { ServerSession(connection: c, session: $0) }
                     if !archived.isEmpty {
@@ -74,8 +84,8 @@ struct ProjectsSidebar: View {
         let items: [ServerSession]
     }
 
-    /// The server's projects with sessions, the one worked in last first;
-    /// in each, what needs you, then the latest.
+    /// The server's projects: those with sessions, the one worked in last
+    /// first, then the others by name. In each, what needs you, then the latest.
     private func groups(_ c: ServerConnection) -> [ProjectGroup] {
         var order: [String] = []
         var byProject: [String: [ServerSession]] = [:]
@@ -83,11 +93,13 @@ struct ProjectsSidebar: View {
             if byProject[s.projectId] == nil { order.append(s.projectId) }
             byProject[s.projectId, default: []].append(ServerSession(connection: c, session: s))
         }
-        return order.map { id in
+        let worked = order.map { id in
             let items = byProject[id] ?? []
             return ProjectGroup(projectID: id, name: c.projects[id]?.name ?? "Project",
                                 items: items.filter(\.session.needsYou) + items.filter { !$0.session.needsYou })
         }
+        return worked + c.sortedProjects.filter { byProject[$0.id] == nil }
+            .map { ProjectGroup(projectID: $0.id, name: $0.name, items: []) }
     }
 
     private func projectExpanded(_ server: String, _ project: String) -> Binding<Bool> {
@@ -130,12 +142,12 @@ struct ProjectsSidebar: View {
     }
 }
 
-/// A project in the Projects layout: its name and how many sessions it has;
-/// while folded shut, whether one needs you.
+/// A project in the Projects layout: its name, the state of its session that
+/// asks most for a look, and how many sessions it has.
 private struct ProjectLabel: View {
     let name: String
     let count: Int
-    let waiting: Bool
+    let status: Session?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -145,11 +157,8 @@ private struct ProjectLabel: View {
             Text(name)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
-            if waiting {
-                Image(systemName: "hand.raised.fill")
-                    .scaledFont(.caption)
-                    .foregroundStyle(Palette.yellow)
-                    .accessibilityLabel("Needs you")
+            if let status {
+                StatusGlyph(session: status)
             }
             Spacer(minLength: 4)
             Text("\(count)")

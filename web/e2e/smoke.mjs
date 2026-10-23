@@ -247,9 +247,77 @@ await page.locator(".session-column .session-row").first().waitFor();
 await page.locator(".collection-row", { hasText: project }).click();
 await page.locator(".session-column .bar-title", { hasText: project }).waitFor();
 await shot("layout-columns");
+// A project's collection, and a project's +, start a new session in that
+// project. Forgetting the project used last leaves only them to choose it.
+const startsInProject = async (what) => {
+  const chosen = await page.locator(".form-row", { hasText: "Project" }).locator("select").evaluate((s) => s.selectedOptions[0]?.textContent);
+  if (chosen !== project) throw new Error(`${what} starts a session in ${chosen}, not ${project}`);
+  await page.getByRole("button", { name: "Cancel" }).click();
+};
+await page.evaluate(() => localStorage.removeItem("lastProject"));
+await page.locator(".session-column").getByRole("button", { name: "New session" }).click();
+await startsInProject("the project's collection");
+await page.locator(".collection-row", { hasText: project }).hover();
+await page.getByRole("button", { name: `New session in ${project}` }).click();
+await startsInProject("the collection's +");
 await layout("projects");
 await page.locator(".project-row", { hasText: project }).waitFor();
 await shot("layout-projects");
+await page.locator(".project-row", { hasText: project }).hover();
+await shot("project-plus");
+await page.getByRole("button", { name: `New session in ${project}` }).click();
+await startsInProject("the project's +");
+
+step("forget a project");
+await page.getByRole("button", { name: "New session" }).first().click();
+const projectPicker = page.locator(".form-row", { hasText: "Project" }).locator("select");
+await projectPicker.selectOption({ label: project });
+// The server keeps a project while it has sessions that aren't archived.
+await page.getByRole("button", { name: `Forget ${project}` }).click();
+await page.getByText(/archive them first/).waitFor();
+await shot("forget-refused");
+const addRoot = async () => {
+  await page.getByRole("button", { name: "Add a folder…" }).click();
+  await page.locator(".folder-row").first().click(); // the root
+  await page.getByRole("button", { name: "Use folder" }).click();
+  // The folder added is chosen once the server answers.
+  const added = await page.waitForFunction((p) => {
+    const name = document.querySelector(".form-row select").selectedOptions[0]?.textContent;
+    return name !== p && name !== "Choose…" && name;
+  }, project);
+  return added.jsonValue();
+};
+const root = await addRoot();
+// The Projects layout shows it without sessions, until it's forgotten.
+const rootRow = page.locator(".project-row", { hasText: root });
+await rootRow.waitFor();
+if ((await rootRow.locator(".row-plus-count").textContent()) !== "0") throw new Error(`${root} doesn't show that it has no sessions`);
+await shot("project-without-sessions");
+await page.getByRole("button", { name: `Forget ${root}` }).click();
+await page.waitForFunction((name) => {
+  const s = document.querySelector(".form-row select");
+  return s.value === "" && ![...s.options].some((o) => o.textContent === name);
+}, root);
+await rootRow.waitFor({ state: "detached" });
+await addRoot();
+await page.getByRole("button", { name: "Cancel" }).click();
+// From its menu in the sidebar too. In three columns, forgetting the chosen
+// project shows All Sessions.
+await layout("columns");
+const projectMenu = async (name) => {
+  await page.locator(".collection-row", { hasText: name }).hover();
+  await page.getByRole("button", { name: `${name} actions` }).click();
+};
+await projectMenu(project);
+if (!(await page.getByRole("menuitem", { name: "Forget project" }).isDisabled())) throw new Error(`${project} can be forgotten with its sessions`);
+await page.keyboard.press("Escape");
+await page.locator(".collection-row", { hasText: root }).click();
+await projectMenu(root);
+await shot("project-menu");
+await page.getByRole("menuitem", { name: "Forget project" }).click();
+await page.locator(".collection-row", { hasText: root }).waitFor({ state: "detached" });
+await page.locator(".session-column .bar-title", { hasText: "All Sessions" }).waitFor();
+await layout("projects");
 
 step("collapse the server, which a reload keeps");
 const header = page.locator(".server-header-main");
@@ -266,6 +334,60 @@ await page.locator(".session-row").first().hover();
 await page.getByRole("button", { name: "Archive" }).first().click();
 await page.getByRole("button", { name: "Archive", exact: true }).last().click();
 await page.getByText(/Archived/).waitFor();
+
+step("server settings: update and sign in the fake agent, and name sessions with it");
+const fake = "Fake (scripted)";
+const openServerSettings = async () => {
+  await page.locator(".server-header").hover();
+  await page.getByRole("button", { name: / actions$/ }).click();
+  await page.getByRole("menuitem", { name: "Server Settings…" }).click();
+  await page.locator(".modal-subtitle", { hasText: "Server" }).waitFor();
+  await page.waitForFunction(() => !document.body.innerText.includes("Checking for updates…"));
+};
+const fakeMenu = async (item) => {
+  await page.getByRole("button", { name: `${fake} actions` }).click();
+  await page.getByRole("menuitem", { name: item, exact: true }).click();
+};
+const closeTask = () => page.getByRole("button", { name: "Done" }).last().click();
+const systemAgent = page.getByLabel(/^Agent/);
+await openServerSettings();
+await page.getByText("rad dev is a development build, which doesn't update itself.").waitFor();
+await page.locator(".harness-row", { hasText: fake }).getByText("Ready").waitFor();
+await shot("server-settings");
+await fakeMenu("Update");
+await page.getByRole("heading", { name: `Updating ${fake}` }).waitFor();
+await page.locator(".task-status", { hasText: `${fake} 1` }).waitFor();
+await shot("server-task-updated");
+await closeTask();
+await fakeMenu("Sign In Again");
+await page.getByText("Waiting for you to sign in…").waitFor();
+await page.getByPlaceholder("Paste the code here").waitFor();
+await shot("server-task-sign-in");
+// The sign-in page opens in a tab of its own, without the network.
+await context.route("https://example.com/**", (r) => r.fulfill({ body: "<h1>Sign in</h1>", contentType: "text/html" }));
+const [signInPage] = await Promise.all([context.waitForEvent("page"), page.getByRole("button", { name: "Open Sign-In Page" }).click()]);
+if (signInPage.url() !== "https://example.com/fake-login?session=42") throw new Error("Open Sign-In Page opened " + signInPage.url());
+await signInPage.close();
+await page.getByPlaceholder("Paste the code here").fill("code42");
+await page.getByRole("button", { name: "Send", exact: true }).click();
+await page.locator(".task-status", { hasText: "Signed in." }).waitFor();
+await shot("server-task-signed-in");
+await closeTask();
+await systemAgent.selectOption({ label: fake });
+await page.getByLabel(/^Model/).waitFor();
+await page.getByRole("button", { name: "Done" }).click();
+await page.getByRole("button", { name: "New session" }).first().click();
+await page.locator(".form-row", { hasText: "Project" }).locator("select").selectOption({ label: project });
+await page.locator(".harness-row", { hasText: "Fake" }).click();
+await page.getByPlaceholder("What should the agent do?").fill("tidy up the readme please");
+await page.getByRole("button", { name: "Start", exact: true }).click();
+await page.locator(".session-heading h1", { hasText: "Named: tidy up the readme" }).waitFor();
+await shot("named-session");
+// Back to no system agent.
+await openServerSettings();
+await systemAgent.selectOption({ label: "None" });
+await page.getByLabel(/^Model/).waitFor({ state: "detached" });
+await page.getByRole("button", { name: "Done" }).click();
 
 step("remove server");
 await page.locator(".server-header").hover();

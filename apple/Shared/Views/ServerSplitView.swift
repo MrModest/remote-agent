@@ -16,8 +16,10 @@ struct ServerSplitView: View {
     @AppStorage("sessionCollection") private var openCollection = ""
     @State private var showAdd = false
     @State private var newSession: NewSessionRequest?
-    @State private var archiving: ArchiveRequest?
+    @State private var archiving: SessionRequest?
+    @State private var deleting: SessionRequest?
     @State private var removing: SavedServer?
+    @State private var managing: ServerRequest?
     #if os(macOS)
     @Environment(Notifier.self) private var notifier
     #endif
@@ -48,24 +50,39 @@ struct ServerSplitView: View {
         return connection.indexSynced && connection.sessions[route.sessionID] == nil
     }
 
-    /// Where a new session starts from the menu bar: on the open session's
+    /// The Columns layout's project is no longer on the server, as when it was
+    /// forgotten, here or on another device. Only the synced index can tell.
+    private var collectionProjectGone: Bool {
+        guard case .project(let serverID, let projectID) = collection.wrappedValue,
+              let server = store.servers.first(where: { $0.id == serverID }) else { return false }
+        let c = store.connection(for: server)
+        return c.indexSynced && c.projects[projectID] == nil
+    }
+
+    /// Where a new session starts from the menu bar, as with the New Session
+    /// button: in the Columns layout's project, else on the open session's
     /// server, else on the first one connected.
-    private var defaultServer: ServerConnection? {
-        let connected = store.connections.filter { $0.state == .connected }
-        return connected.first { $0.server.id == route?.serverID } ?? connected.first
+    private var newSessionTarget: NewSessionRequest? {
+        store.newSessionTarget(in: layout == .columns ? collection.wrappedValue : nil, beside: route)
     }
 
     var body: some View {
         split
             .environment(\.sessionActions, SessionActions(
-                newSession: { newSession = NewSessionRequest(connection: $0) },
+                startSession: { newSession = $0 },
                 archive: { archiving = $0 },
-                remove: { removing = $0 }))
+                delete: { deleting = $0 },
+                remove: { removing = $0 },
+                manage: { managing = ServerRequest(connection: $0) }))
             .sheet(item: $newSession) { request in
-                NewSessionView(connection: request.connection) { session in
+                NewSessionView(connection: request.connection, projectID: request.projectID) { session in
                     selection.wrappedValue = SessionRoute(serverID: request.connection.server.id, sessionID: session.id)
                 }
                 .appStyle()
+            }
+            .sheet(item: $managing) { request in
+                ServerSettingsView(connection: request.connection)
+                    .appStyle()
             }
             .sheet(isPresented: $showAdd) {
                 AddServerView(initialLink: pendingLink) { _ in }
@@ -75,8 +92,8 @@ struct ServerSplitView: View {
             .task(id: store.servers.map(\.id)) {
                 for c in store.connections where c.state == .idle { c.start() }
             }
-            .focusedSceneValue(\.newSession, defaultServer.map { c in
-                Binding { newSession != nil } set: { newSession = $0 ? NewSessionRequest(connection: c) : nil }
+            .focusedSceneValue(\.newSession, newSessionTarget.map { target in
+                Binding { newSession != nil } set: { newSession = $0 ? target : nil }
             })
             .focusedSceneValue(\.pairServer, $showAdd)
             .onChange(of: pendingLink) { _, link in
@@ -90,6 +107,9 @@ struct ServerSplitView: View {
                 if gone { openSession = "" }
             }
             .onChange(of: revealKey, initial: true) { _, _ in reveal() }
+            .onChange(of: collectionProjectGone, initial: true) { _, gone in
+                if gone { collection.wrappedValue = .all }
+            }
             #if os(macOS)
             .onChange(of: route, initial: true) { _, route in notifier.shown = route }
             .onChange(of: notifier.opened, initial: true) { _, route in
@@ -117,6 +137,7 @@ struct ServerSplitView: View {
             } content: {
                 SessionListColumn(collection: collection.wrappedValue ?? .all, selection: selection)
                     .archiveSessionDialog($archiving)
+                    .deleteSessionDialog($deleting)
                     #if os(macOS)
                     .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 460)
                     #else
@@ -129,6 +150,7 @@ struct ServerSplitView: View {
             NavigationSplitView {
                 SessionsSidebar(layout: layout, selection: selection, showAdd: $showAdd)
                     .archiveSessionDialog($archiving)
+                    .deleteSessionDialog($deleting)
                     .removeServerDialog($removing)
                     #if os(macOS)
                     .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
@@ -189,9 +211,4 @@ struct ServerSplitView: View {
             collection.wrappedValue = s.archived ? .archived : .all
         }
     }
-}
-
-private struct NewSessionRequest: Identifiable {
-    let id = UUID()
-    let connection: ServerConnection
 }

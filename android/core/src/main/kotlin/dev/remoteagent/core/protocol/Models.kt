@@ -381,6 +381,12 @@ data class HarnessCaps(
     val setMode: Boolean = false,
     val freeModel: Boolean = false,
     val modelSelect: Boolean = false,
+    /** `harness.update` runs the agent's own updater. Older servers leave these out. */
+    val update: Boolean = false,
+    /** `harness.login` signs the agent in again. */
+    val login: Boolean = false,
+    /** It can be the system agent (`ServerSettings`). */
+    val oneShot: Boolean = false,
 )
 
 @Serializable
@@ -450,6 +456,91 @@ data class ServerInfo(
     /** The server runs shells for sessions (`GET /v1/terminal`). */
     val terminal: Boolean? = null,
 )
+
+/**
+ * The agent, and its model, that does rad's own small jobs: naming new
+ * sessions and their worktree branches from the first prompt.
+ */
+@Serializable
+data class SystemAgent(
+    val harness: String,
+    /** Null: the harness's default. */
+    val model: String? = null,
+    /** Null: the model's default. */
+    val effort: String? = null,
+)
+
+/** The settings clients change (`server.settings`, `server.setSettings`). */
+@Serializable
+data class ServerSettings(
+    /** Null: none, and a session's title is its prompt's first line. */
+    val systemAgent: SystemAgent? = null,
+)
+
+/** What `server.checkUpdate` found out about rad's releases. */
+@Serializable
+data class UpdateInfo(
+    val current: String,
+    /** Null: the lookup failed, and `reason` says why. */
+    val latest: String? = null,
+    /** The latest release's page. */
+    val url: String? = null,
+    /** `latest` is newer than `current`. */
+    val available: Boolean = false,
+    /** How an update installs, `VIA_RAD` or `VIA_APP` (unknown ones kept); null: it can't, and `reason` says why. */
+    val via: String? = null,
+    val reason: String? = null,
+    /** The titles of the sessions a restart would interrupt. */
+    val busy: List<String> = emptyList(),
+) {
+    companion object {
+        /** rad downloads the release and restarts as it. */
+        const val VIA_RAD = "rad"
+        /** The Remote Agent Server app updates itself, and its rad. */
+        const val VIA_APP = "app"
+    }
+}
+
+/**
+ * A maintenance job on the server: updating rad or an agent, or signing an
+ * agent in. Clients poll it with `task.get` while it runs (ServerTaskProgress).
+ */
+@Serializable
+data class ServerTask(
+    val id: String,
+    /** `UPDATE_SERVER`, `UPDATE_AGENT` or `LOGIN`; a newer server's kinds are kept as sent. */
+    val kind: String,
+    /** The agent, for an update or a login. */
+    val harness: String? = null,
+    /** UNKNOWN (a status this app doesn't know) counts as ended, as failed. */
+    val status: Status,
+    /** The command's output as a terminal shows it, without colours: its last lines. */
+    val output: String = "",
+    /** The last web address in the output, such as a sign-in page. */
+    val url: String? = null,
+    /** It takes `task.input` now, such as a code to paste. */
+    val input: Boolean = false,
+    val error: String? = null,
+    /** For an update, the version installed; for a login, the agent's. */
+    val version: String? = null,
+    val startedAt: Instant,
+    val endedAt: Instant? = null,
+) {
+    @Serializable(with = Status.Serializer::class)
+    enum class Status(override val wire: String) : WireEnum {
+        RUNNING("running"), SUCCEEDED("succeeded"), FAILED("failed"), CANCELLED("cancelled"), UNKNOWN("unknown");
+
+        object Serializer : LenientEnumSerializer<Status>("ServerTask.Status", entries.toTypedArray(), UNKNOWN)
+    }
+
+    val running: Boolean get() = status == Status.RUNNING
+
+    companion object {
+        const val UPDATE_SERVER = "update_server"
+        const val UPDATE_AGENT = "update_agent"
+        const val LOGIN = "login"
+    }
+}
 
 /**
  * A text frame on a terminal socket. The shell's output and the user's

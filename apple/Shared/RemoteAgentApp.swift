@@ -10,6 +10,7 @@ struct RemoteAgentApp: App {
     @Environment(\.scenePhase) private var phase
     #if os(macOS)
     @State private var notifier: Notifier
+    @State private var updater = AppUpdater()
 
     init() {
         // The app has one window: without this, "Prefer tabs when opening
@@ -40,6 +41,7 @@ struct RemoteAgentApp: App {
         Settings {
             SettingsView()
                 .environment(notifier)
+                .environment(updater)
                 .frame(width: 460)
                 // As tall as the form, which grows with the text sizes. The
                 // form can still come out a fraction of a point taller, which
@@ -62,7 +64,7 @@ struct RemoteAgentApp: App {
                 .environment(notifier)
         }
         .defaultSize(width: 1100, height: 760)
-        .commands { AppCommands() }
+        .commands { AppCommands(updater: updater) }
     }
     #else
     private var mainWindow: some Scene {

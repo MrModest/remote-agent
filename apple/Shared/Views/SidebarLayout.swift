@@ -35,9 +35,30 @@ enum SidebarLayout: String, CaseIterable, Identifiable {
 /// What a sidebar's rows and menus ask of the split view, which shows the
 /// sheets and confirmations for every layout.
 struct SessionActions {
-    var newSession: (ServerConnection) -> Void = { _ in }
-    var archive: (ArchiveRequest) -> Void = { _ in }
+    var startSession: (NewSessionRequest) -> Void = { _ in }
+    var archive: (SessionRequest) -> Void = { _ in }
+    var delete: (SessionRequest) -> Void = { _ in }
     var remove: (SavedServer) -> Void = { _ in }
+    var manage: (ServerConnection) -> Void = { _ in }
+
+    /// A new session on the server, in one of its projects when given.
+    func newSession(_ connection: ServerConnection, projectID: String = "") {
+        startSession(NewSessionRequest(connection: connection, projectID: projectID))
+    }
+}
+
+/// A server whose settings to show.
+struct ServerRequest: Identifiable {
+    let id = UUID()
+    let connection: ServerConnection
+}
+
+/// A new session to start: on a server, in one of its projects, or with ""
+/// in the project used last.
+struct NewSessionRequest: Identifiable {
+    let id = UUID()
+    let connection: ServerConnection
+    var projectID = ""
 }
 
 extension EnvironmentValues {
@@ -67,6 +88,27 @@ extension Session {
     var needsYou: Bool { status == .awaitingApproval || status == .error }
     /// Working, or done but with tasks left running in the background.
     var isBusy: Bool { status == .running || (status == .idle && backgroundTasks?.isEmpty == false) }
+
+    /// How much the session asks for a look: an answer it waits for, then a
+    /// failure, then work, then work left in the background. Idle and stopped
+    /// sessions ask nothing.
+    var urgency: Int {
+        switch status {
+        case .awaitingApproval: 4
+        case .error: 3
+        case .running: 2
+        case .idle where backgroundTasks?.isEmpty == false: 1
+        default: 0
+        }
+    }
+}
+
+extension Sequence<Session> {
+    /// The session whose state a project's row shows for all of them: the
+    /// one that asks most, if any does.
+    var mostPressing: Session? {
+        filter { $0.urgency > 0 }.max { $0.urgency < $1.urgency }
+    }
 }
 
 extension ServerStore {
@@ -77,6 +119,20 @@ extension ServerStore {
         connections
             .flatMap { c in (archived ? c.archivedSessions : c.activeSessions).map { ServerSession(connection: c, session: $0) } }
             .sorted { $0.session.updatedAt > $1.session.updatedAt }
+    }
+
+    /// Where a new session starts: in the project chosen in the Columns
+    /// layout, on its server; else on the open session's server; else on the
+    /// first one connected.
+    func newSessionTarget(in collection: SessionCollection?, beside open: SessionRoute?) -> NewSessionRequest? {
+        let connected = connections.filter { $0.state == .connected }
+        if case .project(let server, let project) = collection,
+           let c = connected.first(where: { $0.server.id == server }) {
+            // Its server alone, if the project was forgotten while chosen.
+            return NewSessionRequest(connection: c, projectID: c.projects[project] == nil ? "" : project)
+        }
+        return (connected.first { $0.server.id == open?.serverID } ?? connected.first)
+            .map { NewSessionRequest(connection: $0) }
     }
 
     /// Tries again where a connection gave up, and asks the others for their agents.
@@ -103,6 +159,10 @@ enum SessionCollection: Hashable {
         case "project" where parts.count == 3: self = .project(serverID: parts[1], projectID: parts[2])
         default: return nil
         }
+    }
+
+    var isProject: Bool {
+        if case .project = self { true } else { false }
     }
 
     var stored: String {

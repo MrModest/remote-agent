@@ -1,0 +1,10 @@
+{
+  "id": 8,
+  "result": {
+    "systemAgent": {
+      "harness": "claude",
+      "model": "haiku",
+      "effort": "low"
+    }
+  }
+}

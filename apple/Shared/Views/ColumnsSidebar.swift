@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The Columns layout's sidebar, as Mail's: the collections a session can be
 /// in. What needs you, what is working and every session, then each server's
-/// projects that have sessions, then the archive. The sessions are a column of
+/// projects, then the archive. The sessions are a column of
 /// their own beside it (`SessionListColumn`), which keeps the sidebar to two
 /// levels, as the HIG asks.
 struct CollectionsSidebar: View {
@@ -34,7 +34,8 @@ struct CollectionsSidebar: View {
                     ConnectionStatusRow(connection: c)
                     ForEach(projects(c), id: \.project.id) { p in
                         link(.project(serverID: c.server.id, projectID: p.project.id), p.project.name,
-                             symbol: "folder", count: p.count)
+                             symbol: "folder", count: p.sessions.count, status: p.sessions.mostPressing)
+                            .contextMenu { ProjectMenuItems(connection: c, projectID: p.project.id) }
                     }
                 } header: {
                     ServerHeader(connection: c, expanded: expanded)
@@ -53,12 +54,18 @@ struct CollectionsSidebar: View {
     }
 
     private func link(_ c: SessionCollection, _ title: String, symbol: String, count: Int,
-                      tint: Color = Palette.accent) -> some View {
+                      tint: Color = Palette.accent, status: Session? = nil) -> some View {
         NavigationLink(value: c) {
             Label {
-                Text(title)
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                    // A project's: the state of its session that asks most for a look.
+                    if let status {
+                        StatusGlyph(session: status)
+                    }
+                }
             } icon: {
                 Image(systemName: symbol)
                     .foregroundStyle(tint)
@@ -66,7 +73,8 @@ struct CollectionsSidebar: View {
             .scaledFont(.body)
             .environment(\.backgroundProminence, .standard)
         }
-        .badge(count)
+        // A project shows that it has none; the others, as Mail's, nothing.
+        .badge(count > 0 || c.isProject ? Text(count, format: .number) : nil)
         // On the Mac a badge hides the link's value from the list, which then
         // selects nothing when the row is clicked; the tag gives the value back.
         .tag(c)
@@ -76,10 +84,10 @@ struct CollectionsSidebar: View {
         .listRowBackground(SidebarSelection(selected: collection == c))
     }
 
-    /// The server's projects that have sessions, by name, with how many.
-    private func projects(_ c: ServerConnection) -> [(project: Project, count: Int)] {
-        let counts = Dictionary(grouping: c.activeSessions, by: \.projectId).mapValues(\.count)
-        return c.sortedProjects.compactMap { p in counts[p.id].map { (p, $0) } }
+    /// The server's projects by name, with their sessions.
+    private func projects(_ c: ServerConnection) -> [(project: Project, sessions: [Session])] {
+        let sessions = Dictionary(grouping: c.activeSessions, by: \.projectId)
+        return c.sortedProjects.map { p in (p, sessions[p.id] ?? []) }
     }
 }
 
@@ -116,7 +124,7 @@ struct SessionListColumn: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                NewSessionButton(selection: selection)
+                NewSessionButton(selection: selection, collection: collection)
             }
         }
     }

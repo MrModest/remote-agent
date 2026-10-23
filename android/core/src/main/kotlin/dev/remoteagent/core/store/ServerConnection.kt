@@ -13,7 +13,10 @@ import dev.remoteagent.core.protocol.HarnessInfo
 import dev.remoteagent.core.protocol.ImageRef
 import dev.remoteagent.core.protocol.Project
 import dev.remoteagent.core.protocol.ServerInfo
+import dev.remoteagent.core.protocol.ServerSettings
+import dev.remoteagent.core.protocol.ServerTask
 import dev.remoteagent.core.protocol.Session
+import dev.remoteagent.core.protocol.UpdateInfo
 import dev.remoteagent.core.protocol.WireCoding
 import dev.remoteagent.core.protocol.Workspace
 import kotlinx.coroutines.CoroutineScope
@@ -478,6 +481,54 @@ class ServerConnection(
         client.callRaw("session.archive", params("sessionId" to sessionID, "removeWorktree" to removeWorktree))
     }
 
+    /** Deletes a session and its transcript for good; the index then drops it. */
+    suspend fun delete(sessionID: String, removeWorktree: Boolean) {
+        client.callRaw("session.delete", params("sessionId" to sessionID, "removeWorktree" to removeWorktree))
+    }
+
+    // Managing the server (protocol/PROTOCOL.md, "Managing the server")
+
+    suspend fun settings(): ServerSettings = client.call("server.settings")
+
+    /** Replaces the settings, all of them: a null `systemAgent` unsets it. Returns what the server kept. */
+    suspend fun setSettings(settings: ServerSettings): ServerSettings =
+        client.call("server.setSettings", WireCoding.json.encodeToJsonElement(settings))
+
+    /** rad's latest release, and whether it can install it; `refresh` looks again rather than use the last answer. */
+    suspend fun checkUpdate(refresh: Boolean): UpdateInfo = client.call("server.checkUpdate", params("refresh" to refresh), 45.seconds)
+
+    /** Installs rad's latest release, then rad restarts as it (ServerTaskProgress waits for it). */
+    suspend fun updateServer(): ServerTask = client.call("server.update", timeout = 45.seconds)
+
+    /** Runs the agent's own updater on the server. */
+    suspend fun updateHarness(id: String): ServerTask = client.call("harness.update", params("harness" to id), 45.seconds)
+
+    /** Signs the agent in again: the task's `url` is the page to open here. */
+    suspend fun loginHarness(id: String): ServerTask = client.call("harness.login", params("harness" to id), 45.seconds)
+
+    /** A task; `not_found` once rad has forgotten it, as after a restart. */
+    suspend fun task(id: String): ServerTask = client.call("task.get", params("id" to id))
+
+    /** The tasks running and lately ended, oldest first. */
+    suspend fun tasks(): List<ServerTask> = client.call<TaskList>("task.list").tasks
+
+    /**
+     * Types `text` and Return into the task's command, such as a code to
+     * paste. The sign-in page opens in the browser, which stops the app (and
+     * so the socket), so this waits for the connection, as uploadImage does.
+     * Unlike `deliver`, it isn't sent again after a dropped connection: the
+     * line would be typed twice.
+     */
+    suspend fun taskInput(id: String, text: String) {
+        withTimeoutOrNull(10.seconds) { waitUntilConnected() }
+        client.callRaw("task.input", params("id" to id, "text" to text))
+    }
+
+    suspend fun cancelTask(id: String) {
+        withTimeoutOrNull(10.seconds) { waitUntilConnected() }
+        client.callRaw("task.cancel", params("id" to id))
+    }
+
     companion object {
         /** Failed attempts in a row before the connection gives up. */
         const val MAX_ATTEMPTS = 5
@@ -486,6 +537,9 @@ class ServerConnection(
 
 @Serializable
 private data class HarnessList(val harnesses: List<HarnessInfo> = emptyList())
+
+@Serializable
+private data class TaskList(val tasks: List<ServerTask> = emptyList())
 
 @Serializable
 data class Branches(val branches: List<String> = emptyList(), val current: String = "")

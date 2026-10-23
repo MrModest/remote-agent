@@ -7,6 +7,10 @@ import dev.remoteagent.core.protocol.Event
 import dev.remoteagent.core.protocol.Item
 import dev.remoteagent.core.protocol.ItemKind
 import dev.remoteagent.core.protocol.ItemStatus
+import dev.remoteagent.core.protocol.Session
+import dev.remoteagent.core.protocol.Turn
+import dev.remoteagent.core.protocol.TurnStatus
+import dev.remoteagent.core.protocol.WireCoding
 import dev.remoteagent.core.store.Drafts
 import dev.remoteagent.core.store.ImageCache
 import dev.remoteagent.core.store.Outgoing
@@ -19,6 +23,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -188,6 +193,42 @@ class SessionStoreTests {
         assertEquals("no such session", assertFailsWith<RpcError> { s.sendNow("q") }.message)
     }
 
+    private fun turn(seq: Long, id: String) = Event(
+        stream = "session:s", seq = seq, type = "turn.upserted",
+        turn = Turn(id = id, sessionId = "s", n = 1, status = TurnStatus.COMPLETED, startedAt = Instant.parse("2026-10-09T12:00:00Z")),
+    )
+
+    private fun removed(seq: Long) = Event(stream = "session:s", seq = seq, type = "session.removed", id = "s")
+
+    @Test
+    fun deletedSessionEmptiesTheStore() = runTest {
+        val h = Host(this)
+        val s = SessionStore("s", h)
+        s.setSession(WireCoding.json.decodeFromJsonElement<Session>(FakeRad.session("s")))
+        s.apply(listOf(turn(1, "t"), event(2, "a", 1, "first")))
+        s.synchronized(2, true)
+        s.send("unconfirmed")
+        assertFalse(s.removed.value)
+        // Deleted, here or on another device: the stream's next event says so.
+        s.apply(listOf(removed(3)))
+        assertTrue(s.removed.value)
+        assertNull(s.session.value)
+        assertTrue(s.turns.value.isEmpty())
+        assertTrue(s.transcript.value.isEmpty())
+        assertTrue(s.items.isEmpty())
+        assertTrue(s.outbox.value.isEmpty())
+    }
+
+    @Test
+    fun subscribingToADeletedSessionReplaysItsRemoval() {
+        val s = SessionStore("s", null)
+        // Its stream holds only the removal, the next in its seq.
+        s.apply(listOf(removed(12)))
+        assertFalse(s.removed.value) // not applied until synchronized
+        s.synchronized(12, true)
+        assertTrue(s.removed.value)
+        assertTrue(s.transcript.value.isEmpty())
+    }
 }
 
 /** As PairingTests in StoreTests.swift and web/src/protocol/pairing.test.ts. */

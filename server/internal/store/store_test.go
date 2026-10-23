@@ -462,3 +462,25 @@ func TestItemsWithStatus(t *testing.T) {
 		t.Errorf("in progress = %s", got)
 	}
 }
+
+func TestSettings(t *testing.T) {
+	st := openTest(t)
+	ctx := context.Background()
+	got, err := st.Settings(ctx)
+	if err != nil || got.SystemAgent != nil {
+		t.Fatalf("fresh settings = %+v, %v", got, err)
+	}
+	want := model.ServerSettings{SystemAgent: &model.SystemAgent{Harness: "claude", Model: "haiku"}}
+	if err := st.SetSettings(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Settings(ctx); got.SystemAgent == nil || *got.SystemAgent != *want.SystemAgent {
+		t.Fatalf("settings = %+v", got)
+	}
+	if err := st.SetSettings(ctx, model.ServerSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Settings(ctx); got.SystemAgent != nil {
+		t.Fatalf("cleared settings = %+v", got)
+	}
+}

@@ -92,6 +92,7 @@ struct SettingsView: View {
 
                 #if os(macOS)
                 NotificationsSection()
+                UpdatesSection()
                 #endif
 
                 Section {
@@ -289,6 +290,29 @@ private struct NotificationsSection: View {
     }
 
     private var blocked: Bool { enabled && notifier.authorization == .denied }
+}
+
+/// Whether the app looks for updates, and installs them by itself.
+private struct UpdatesSection: View {
+    @Environment(AppUpdater.self) private var updater
+
+    var body: some View {
+        @Bindable var updater = updater
+        if updater.isRelease {
+            Section {
+                Toggle("Check for updates automatically", isOn: $updater.checksAutomatically)
+                Toggle("Download and install automatically", isOn: $updater.downloadsAutomatically)
+                    .disabled(!updater.checksAutomatically)
+            } header: {
+                Text("Updates").formHeaderFont()
+            } footer: {
+                Text(updater.downloadsAutomatically && updater.checksAutomatically
+                     ? "Once a day. A new version installs when you quit Remote Agent."
+                     : "Once a day. Remote Agent asks before installing a new version.")
+                    .formFooterFont()
+            }
+        }
+    }
 }
 #endif
 

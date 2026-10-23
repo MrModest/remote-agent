@@ -214,8 +214,7 @@ struct ImageGallery: View {
     /// The images Quick Look pages through, when the gallery shows only some
     /// of the item's: a reply shows each where its text links to it.
     var browsing: [ImageRef]?
-    @State private var files: [URL] = []
-    @State private var shown: URL?
+    @Environment(\.imagePreview) private var preview
     @State private var opening = false
 
     var body: some View {
@@ -231,7 +230,6 @@ struct ImageGallery: View {
                 .accessibilityHint("Shows the image")
             }
         }
-        .quickLookPreview($shown, in: files)
     }
 
     /// Quick Look takes files, so the images are saved first; they are
@@ -248,10 +246,85 @@ struct ImageGallery: View {
             if image.id == ref.id { target = url }
         }
         guard let target else { return }
-        self.files = files
-        shown = target
+        preview?.show(target, among: files)
     }
 }
+
+/// The image Quick Look shows for a transcript's galleries. They share one
+/// preview, which a tap on another image points elsewhere, so there is one
+/// preview to close.
+@MainActor @Observable
+final class ImagePreview {
+    var files: [URL] = []
+    var shown: URL?
+
+    func show(_ url: URL, among files: [URL]) {
+        self.files = files
+        shown = url
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var imagePreview: ImagePreview? = nil
+}
+
+extension View {
+    /// Shows the images that the galleries inside open, in one Quick Look
+    /// preview. On the Mac, Esc or a click in the window closes it.
+    func imagePreviews() -> some View { modifier(ImagePreviewHost()) }
+}
+
+private struct ImagePreviewHost: ViewModifier {
+    @State private var preview = ImagePreview()
+
+    func body(content: Content) -> some View {
+        @Bindable var preview = preview
+        content
+            .environment(\.imagePreview, preview)
+            .quickLookPreview($preview.shown, in: preview.files)
+            #if os(macOS)
+            .background { PreviewCloser(preview: preview) }
+            #endif
+    }
+}
+
+#if os(macOS)
+/// Closes the preview on Esc, or on a click anywhere in the window before the
+/// click does what it would; a click on another image then opens that one.
+/// Quick Look's panel takes Esc only while it is the key window, which a
+/// click back in the window takes from it.
+private struct PreviewCloser: NSViewRepresentable {
+    let preview: ImagePreview
+
+    func makeNSView(context: Context) -> CloserView { CloserView() }
+
+    func updateNSView(_ view: CloserView, context: Context) {
+        view.preview = preview
+    }
+
+    final class CloserView: NSView {
+        var preview: ImagePreview?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            let events: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+            monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
+                guard let self, let preview, preview.shown != nil, event.window === window else { return event }
+                if event.type == .keyDown {
+                    guard event.keyCode == 53 else { return event } // Esc
+                    preview.shown = nil
+                    return nil
+                }
+                preview.shown = nil
+                return event
+            }
+        }
+    }
+}
+#endif
 
 /// An image an agent's reply links to: as large as fits the transcript's
 /// width, up to a height that leaves the text around it in view.

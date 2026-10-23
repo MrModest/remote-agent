@@ -110,7 +110,8 @@ func fixtures() map[string]any {
 				Efforts:     []model.Choice{{ID: "low", Name: "Low"}, {ID: "medium", Name: "Medium"}, {ID: "high", Name: "High"}},
 				Modes:       []model.Choice{{ID: "default", Name: "Ask"}},
 				DefaultMode: "default", Commands: []model.Command{{Name: "compact", Description: "Free up context by summarizing the conversation so far"}},
-				Caps: model.HarnessCaps{Resume: true, Interrupt: true, SetMode: true, FreeModel: true, ModelSelect: true}},
+				Caps: model.HarnessCaps{Resume: true, Interrupt: true, SetMode: true, FreeModel: true, ModelSelect: true,
+					Update: true, Login: true, OneShot: true}},
 			{ID: "codex", Name: "Codex", Protocol: "codex", Installed: true, Version: "0.161.0", Hint: "Not logged in: run `codex login` on this machine"},
 		}}},
 		"response_fs_list.json": response{ID: json.RawMessage("5"), Result: fsbrowse.Listing{Path: "/Users/me/projects", Parent: "/Users/me",
@@ -122,6 +123,21 @@ func fixtures() map[string]any {
 		"response_server_info.json": response{ID: json.RawMessage("1"), Result: serverInfoResult{
 			serverInfo: serverInfo{ServerID: "srv1", Name: "studio", ProtocolVersion: model.ProtocolVersion, Version: "0.4.0"},
 			Roots:      []string{"/Users/me/projects"}, DeviceID: "dev1", Terminal: true}},
+		"response_server_settings.json": response{ID: json.RawMessage("8"), Result: model.ServerSettings{
+			SystemAgent: &model.SystemAgent{Harness: "claude", Model: "haiku", Effort: "low"}}},
+		"response_check_update.json": response{ID: json.RawMessage("9"), Result: model.UpdateInfo{
+			Current: "0.11.0", Latest: "0.12.0", URL: "https://github.com/buldezir/remote-agent/releases/tag/v0.12.0",
+			Available: true, Via: "app", Busy: []string{"Fix the tests"}}},
+		"response_task.json": response{ID: json.RawMessage("10"), Result: model.Task{
+			ID: "k1", Kind: model.TaskLogin, Harness: "claude", Status: model.TaskRunning,
+			Output: "$ claude auth login\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\nPaste code here if prompted >",
+			URL:    "https://claude.com/cai/oauth/authorize?code=true", Input: true, StartedAt: t0}},
+		"response_task_list.json": response{ID: json.RawMessage("11"), Result: map[string]any{"tasks": []model.Task{
+			{ID: "k2", Kind: model.TaskUpdateAgent, Harness: "codex", Status: model.TaskSucceeded, Output: "$ codex update\nCodex 0.163.0 → 0.164.0",
+				Version: "0.164.0", StartedAt: t0, EndedAt: &t1},
+			{ID: "k3", Kind: model.TaskUpdateServer, Status: model.TaskFailed, Output: "Downloading rad 0.12.0 (rad-linux-amd64.tar.gz)…",
+				Error: "rad-linux-amd64.tar.gz doesn't match its checksum in SHA256SUMS", StartedAt: t0, EndedAt: &t1},
+		}}},
 		"terminal_attached.json": model.TerminalMessage{Type: "attached", ID: "5f0c2a9e1b7d3c48", Offset: 262130, Reset: true, Cols: 80, Rows: 24},
 		"terminal_resize.json":   model.TerminalMessage{Type: "resize", Cols: 120, Rows: 40},
 		"terminal_exit.json":     model.TerminalMessage{Type: "exit", ExitCode: &signalled},

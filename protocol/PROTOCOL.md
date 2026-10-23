@@ -139,7 +139,7 @@ Each event carries exactly one of `project`, `session`, `turn` or `item`, or `id
 | `project.upserted` | `project` | index |
 | `project.removed` | `id` | index |
 | `session.upserted` | `session` | index and `session:<id>` |
-| `session.removed` | `id` | index |
+| `session.removed` | `id` | index and `session:<id>` (the session was deleted) |
 | `turn.upserted` | `turn` | `session:<id>` |
 | `item.upserted` | `item` | `session:<id>` |
 
@@ -216,6 +216,16 @@ Approval {
 | `server.info` | — | `{serverId, name, protocolVersion, version, roots, deviceId, terminal?}` (`terminal`: `GET /v1/terminal` is there) |
 | `device.unpair` | — | `{}` (revokes the calling device's token) |
 | `harness.list` | `{refresh?}` | `{harnesses: [HarnessInfo]}`, only the ones installed on the server |
+| `harness.update` | `{harness}` | `Task` (runs the agent's own updater; `caps.update`) |
+| `harness.login` | `{harness}` | `Task` (signs the agent in again; `caps.login`) |
+| `server.settings` | — | `ServerSettings` |
+| `server.setSettings` | `ServerSettings` | `ServerSettings` (replaces them all; `invalid` for an agent that can't be the system agent) |
+| `server.checkUpdate` | `{refresh?}` | `UpdateInfo` (`refresh` looks again rather than use the answer of the last 10 minutes) |
+| `server.update` | — | `Task` (`unavailable` when rad can't update, `conflict` when it is up to date) |
+| `task.list` | — | `{tasks: [Task]}`, running and lately ended, oldest first |
+| `task.get` | `{id}` | `Task` (`not_found` once forgotten, as after a restart) |
+| `task.input` | `{id, text}` | `{}` (types `text` and Return into the task's command) |
+| `task.cancel` | `{id}` | `{}` |
 | `fs.list` | `{path?}` (omit for roots) | `{path, parent?, entries: [{name, path, isGitRepo}]}` |
 | `project.list` | — | `{projects}` |
 | `project.add` | `{path}` (must be under a root) | `Project` |
@@ -228,6 +238,7 @@ Approval {
 | `session.sendNow` | `{sessionId, itemId}` | `{}` (see below) |
 | `session.setMode` | `{sessionId, mode}` | `{}` |
 | `session.archive` | `{sessionId, removeWorktree?}` | `{}` (also ends the session's shell) |
+| `session.delete` | `{sessionId, removeWorktree?}` | `{}` (see below) |
 | `approval.respond` | `{commandId, sessionId, approvalId, optionId, message?, answers?}` | `{}` |
 | `subscribe` | `{stream, afterSeq?}` | `{stream, seq}` (see above) |
 | `unsubscribe` | `{stream}` | `{}` |
@@ -244,7 +255,27 @@ HarnessInfo {
   efforts?: [Choice],                          // reasoning efforts for the default model; absent: not selectable
   modes?: [Choice], defaultMode?,              // Choice = {id, name, description?}
   commands?: [{name, description?}],           // slash commands to offer, such as {name: "compact"}
-  caps: { resume, interrupt, setMode, freeModel, modelSelect }
+  caps: { resume, interrupt, setMode, freeModel, modelSelect,
+          update?, login?, oneShot? }           // harness.update, harness.login, and the system agent
+}
+
+ServerSettings { systemAgent?: { harness, model?, effort? } }   // absent: none
+
+UpdateInfo {
+  current, latest?, url?,                      // latest absent: the lookup failed (reason)
+  available,                                   // latest is newer than current
+  via?: "rad" | "app",                         // how it installs; absent: it can't, and reason says why
+  reason?, busy: [title]                       // sessions a restart would interrupt
+}
+
+Task {
+  id, kind: "update_server" | "update_agent" | "login", harness?,
+  status: "running" | "succeeded" | "failed" | "cancelled",
+  output,                                      // the command's output as a terminal shows it, without colours: its last 300 lines
+  url?,                                        // the last web address in it, such as a sign-in page
+  input?,                                      // takes task.input now
+  error?, version?,                            // version: installed by an update, or the agent's
+  startedAt, endedAt?
 }
 
 Diff { from, to, files: [FileStat], patch, truncated }   // patch: unified diff, ≤ 512 KiB
@@ -253,7 +284,17 @@ FileStat { path, oldPath?, status: "added"|"modified"|"deleted"|"renamed", addit
 
 - **Slash commands.** A prompt of `/<name>`, optionally followed by text for the command, runs the command; send it with `session.prompt` like any other. Its turn has the prompt as its user message and, for `/compact`, a `notice` item once the agent has summarized the conversation; the session's `context` then drops. The harness's `commands` are the ones the apps offer in a menu; others typed in a prompt go to the agent as they are.
 - **Composer suggestions.** `session.commands` discovers commands and user-invocable skills in the session's effective workspace, without sending a prompt or starting a turn. It may start or resume the agent process. `name` has no leading slash; `kind` is `skill`, `prompt`, or `extension` when known, and `scope` is the agent-reported source scope (such as `user` or `project`). Metadata may be absent. Archived sessions return an empty array. Clients fetch when entering a leading `/` token, filter names and descriptions locally, and insert `/<name> ` for editing. Suggestions stop once arguments begin. Discovery failures (including an older server's `method_not_found`) leave ordinary prompts and the built-in command menu usable. Clients may append the harness's known commands, deduplicating by name. Codex resolves a matching leading `/skill-name` or `$skill-name` to its native `$skill-name` plus an exact skill input; Claude uses `/name` and Pi `/skill:name`. Paths stay on the server. Discovery is refreshed when the picker reopens; Claude's catalog comes from its process initialization and refreshes when that runtime restarts.
+- **Deleting a session.** `session.delete` works on archived and unarchived sessions. It stops the agent and the session's shell, and deletes the session, its turns, its transcript and its checkpoints; `removeWorktree` deletes its worktree too, and the branch is kept either way. Images stay, since other sessions may show them. The session's stream then holds only a `session.removed` event, the next in its seq, which reaches its subscribers; later commands on the session are `not_found`.
 - **Queued prompts.** A prompt sent while a turn runs waits as a `queued` user message, and the next turn starts with it once the turn ends. Interrupting the turn cancels every queued prompt. `session.sendNow` sends one of them at once instead: rad interrupts the turn and starts the next turn with that prompt, ahead of the others, which stay queued behind it. A prompt no longer queued (it started, or was cancelled) is left as it is.
 - **Images in prompts.** `images` lists ids from `POST /v1/images`. A prompt needs text, images or both. An unknown id is `invalid`.
 - **Approval answers.** For a `question` approval, put `answers` (question text → chosen label; join multiple labels with `", "`) in the request, along with the option of kind `allow_once`.
 - **Deny reasons.** For a deny, `message` is passed to the agent where the harness supports it.
+
+### Managing the server
+
+- **Tasks.** Updates and sign-ins run on the server as tasks, which clients poll with `task.get` (about once a second) while they run. Starting one that already runs (same kind and agent) returns it. rad keeps ended tasks for 15 minutes, and forgets them all when it restarts.
+- **Signing an agent in.** `harness.login` runs the agent's sign-in command in a pseudo-terminal on the server, with `BROWSER` set so that nothing opens there: Claude Code's `claude auth login`, Codex's `codex login --device-auth`, Cursor's `cursor-agent login`. The task's `url` is the page to open on the client. Claude's page then shows a code to paste: send it with `task.input`. Codex shows a code to enter on the page, in `output`, and Cursor needs nothing more. The task succeeds once the command exits and a probe finds the agent signed in.
+  - `authOk` comes from a probe, which may not see that a login expired. When a turn fails because the agent isn't signed in, rad shows the agent as not signed in (`authOk: false`, `hint` with the agent's error) until it signs in or a turn of its succeeds.
+- **Updating an agent.** `harness.update` runs the agent's own updater (`claude update`, `codex update`, `pi update`, `cursor-agent update`, `opencode upgrade`); `version` is the version afterwards.
+- **Updating rad.** `server.update` installs the latest release. With `via: "rad"`, rad downloads it as `rad update` does, then restarts as the new version in the same process: the socket closes, and the client reconnects to find the new `version` in `server.info`. With `via: "app"`, rad runs under the Remote Agent Server app, which updates itself and its rad, then opens again. The task succeeds when the install starts; the restart interrupts the sessions in `busy`, so clients ask first.
+- **The system agent.** With `systemAgent` set, rad has that agent and model name each new session from its first prompt: its title, unless `session.create` gave one, and its worktree's branch (`ra/<words>`), unless it gave one. The session starts at once with names made from the prompt, and its `session.upserted` brings the new ones a few seconds later. The calls run without tools, in an empty folder, and leave no session or history with the agent (`claude -p --no-session-persistence --safe-mode`, `codex exec --ephemeral`, `pi --print --no-session`). An agent can be the system agent when `caps.oneShot`.

@@ -43,6 +43,10 @@ type Orchestrator struct {
 	mu       sync.Mutex
 	actors   map[string]*actor
 	inflight map[string]*sync.Mutex
+
+	bg     context.Context // the system agent's calls; cancelled by Shutdown
+	stopBg context.CancelFunc
+	naming sync.WaitGroup
 }
 
 func New(st *store.Store, reg *harness.Registry, opt Options) *Orchestrator {
@@ -52,7 +56,9 @@ func New(st *store.Store, reg *harness.Registry, opt Options) *Orchestrator {
 	if opt.IdleTimeout == 0 {
 		opt.IdleTimeout = 30 * time.Minute
 	}
-	return &Orchestrator{st: st, reg: reg, opt: opt, log: opt.Log, actors: map[string]*actor{}, inflight: map[string]*sync.Mutex{}}
+	bg, stopBg := context.WithCancel(context.Background())
+	return &Orchestrator{st: st, reg: reg, opt: opt, log: opt.Log, actors: map[string]*actor{}, inflight: map[string]*sync.Mutex{},
+		bg: bg, stopBg: stopBg}
 }
 
 func (o *Orchestrator) Registry() *harness.Registry { return o.reg }
@@ -192,7 +198,7 @@ func (o *Orchestrator) CreateSession(ctx context.Context, p CreateSessionParams)
 		}
 		branch := p.Workspace.Branch
 		if branch == "" {
-			branch = "ra/" + slug(s.Title) + "-" + s.ID[len(s.ID)-6:]
+			branch = provisionalBranch(s.Title, s.ID)
 		}
 		dir := filepath.Join(o.opt.WorktreesDir, proj.ID, s.ID)
 		if err := gitx.AddWorktree(ctx, proj.Path, dir, branch, p.Workspace.BaseRef); err != nil {
@@ -220,6 +226,7 @@ func (o *Orchestrator) CreateSession(ctx context.Context, p CreateSessionParams)
 		if _, err := o.Prompt(ctx, s.ID, p.Prompt, p.Images, cmd); err != nil {
 			o.log.Warn("initial prompt failed", "session", s.ID, "err", err)
 		}
+		o.nameSession(s.ID, proj.Name, p.Prompt, p.Title == "", s.Workspace.Kind == model.WorkspaceWorktree && p.Workspace.Branch == "")
 	}
 	return s, nil
 }
@@ -282,6 +289,10 @@ func (o *Orchestrator) Commands(ctx context.Context, sessionID string) ([]model.
 		return nil, err
 	}
 	a.mu.Lock()
+	if a.deleted {
+		a.mu.Unlock()
+		return nil, errorf(CodeNotFound, "session %s not found", sessionID)
+	}
 	if a.sess.Archived {
 		a.mu.Unlock()
 		return []model.Command{}, nil
@@ -359,6 +370,23 @@ func (o *Orchestrator) Archive(ctx context.Context, sessionID string, removeWork
 	delete(o.actors, sessionID)
 	o.mu.Unlock()
 	return nil
+}
+
+// Delete removes a session for good, archived or not: its agent stops, and
+// its transcript and checkpoints are deleted. removeWorktree deletes its
+// worktree too; its branch is kept.
+func (o *Orchestrator) Delete(ctx context.Context, sessionID string, removeWorktree bool) error {
+	a, err := o.actor(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	err = a.delete(ctx, removeWorktree)
+	// The actor refuses everything now; if the store kept the session, the
+	// next command loads it afresh.
+	o.mu.Lock()
+	delete(o.actors, sessionID)
+	o.mu.Unlock()
+	return err
 }
 
 // Recover fixes up state left behind by a previous process: running turns are
@@ -472,8 +500,10 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	}
 }
 
-// Shutdown stops every runtime.
+// Shutdown stops every runtime, and the system agent.
 func (o *Orchestrator) Shutdown() {
+	o.stopBg()
+	defer o.naming.Wait()
 	o.mu.Lock()
 	actors := make([]*actor, 0, len(o.actors))
 	for _, a := range o.actors {

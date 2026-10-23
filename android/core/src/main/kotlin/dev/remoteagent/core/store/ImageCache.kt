@@ -39,7 +39,11 @@ class ImageCache(private val dir: File?) {
             remember(id, it)
             return it
         }
-        val task = mutex.withLock { loading.getOrPut(id) { loads.async { load() } } }
+        val task = mutex.withLock {
+            // A load that finished while the file was read has kept its bytes.
+            remembered(id)?.let { return it }
+            loading.getOrPut(id) { loads.async { load() } }
+        }
         try {
             val data = task.await()
             store(data, id)

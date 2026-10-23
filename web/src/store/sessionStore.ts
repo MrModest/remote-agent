@@ -240,9 +240,12 @@ export class SessionStore extends Observable {
   }
 
   async commands(): Promise<SlashCommand[]> {
-    if (!this.host) throw RPCError.disconnected();
-    const result = await this.host.call<{ commands: SlashCommand[] }>("session.commands", { sessionId: this.sessionID });
-    return result.commands;
+    try {
+      return (await this.c.call<{ commands: SlashCommand[] }>("session.commands", { sessionId: this.sessionID }, 80_000)).commands;
+    } catch (error) {
+      if (error instanceof RPCError && error.code === "method_not_found") return [];
+      throw error;
+    }
   }
 
   async interrupt(force = false) {

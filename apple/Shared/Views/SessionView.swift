@@ -100,6 +100,7 @@ struct SessionView: View {
             if let e { error = e; attachments.error = nil }
         }
         .task(id: "\(store.sessionID):\(wantsCommands)") {
+            loadingCommands = false
             guard wantsCommands else { return }
             commands = []
             commandsError = false
@@ -317,7 +318,7 @@ struct SessionView: View {
     #endif
 
     private var wantsCommands: Bool {
-        store.isConnected && session?.archived != true && SlashCommand.query(store.draft) != nil
+        composerFocused && store.isConnected && session?.archived != true && SlashCommand.query(store.draft) != nil
     }
 
     private var suggestions: [SlashCommand] {
@@ -407,7 +408,10 @@ struct SessionView: View {
             }
             .onKeyPress(keys: [.tab, .return]) { press in
                 guard !press.modifiers.contains(.shift), suggestions.indices.contains(commandIndex) else { return .ignored }
-                completeCommand(suggestions[commandIndex])
+                let selected = suggestions[commandIndex]
+                if press.key == .return && store.draft == selected.prompt {
+                    if mainAction == .send && canSend { mainButtonTapped() }
+                } else { completeCommand(selected) }
                 return .handled
             }
             .shiftReturnNewline()

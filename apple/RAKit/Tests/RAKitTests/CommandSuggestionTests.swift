@@ -13,3 +13,8 @@ import Testing
         #expect(SlashCommand.suggestions(for: text, from: commands).isEmpty)
     }
 }
+
+@Test func commandNameRanking() {
+    let catalog = [SlashCommand(name: "code-check", description: "Review code"), SlashCommand(name: "preview"), SlashCommand(name: "review-long"), SlashCommand(name: "review")]
+    #expect(SlashCommand.suggestions(for: "/review", from: catalog).map(\.name) == ["review", "review-long", "preview", "code-check"])
+}

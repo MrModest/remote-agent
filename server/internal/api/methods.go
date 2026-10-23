@@ -205,7 +205,7 @@ func (c *conn) dispatch(method string, raw json.RawMessage) (any, error) {
 
 	case "session.commands":
 		return call(raw, func(p sessionParams) (any, error) {
-			commands, err := o.Commands(c.ctx, p.SessionID)
+			commands, err := o.Commands(ctx, p.SessionID)
 			return map[string]any{"commands": commands}, err
 		})
 

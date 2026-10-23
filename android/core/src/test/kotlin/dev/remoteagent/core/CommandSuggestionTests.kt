@@ -20,4 +20,9 @@ class CommandSuggestionTests {
             assertEquals(emptyList(), commandSuggestions(text, commands))
         }
     }
+    @Test fun ranksNamesBeforeDescriptions() {
+        val catalog = listOf(SlashCommand("code-check", "Review code"), SlashCommand("preview"), SlashCommand("review-long"), SlashCommand("review"))
+        assertEquals(listOf("review", "review-long", "preview", "code-check"), commandSuggestions("/review", catalog).map { it.name })
+    }
+
 }

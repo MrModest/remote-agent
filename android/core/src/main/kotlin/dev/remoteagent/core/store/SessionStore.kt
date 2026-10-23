@@ -264,8 +264,13 @@ class SessionStore(val sessionID: String, private val host: SessionHost?) {
     }
 
     suspend fun commands(): List<SlashCommand> {
-        val result = c.callRaw("session.commands", params("sessionId" to sessionID))
-        return WireCoding.json.decodeFromJsonElement<CommandList>(result).commands
+        try {
+            val result = c.callRaw("session.commands", params("sessionId" to sessionID), timeout = 80.seconds)
+            return WireCoding.json.decodeFromJsonElement<CommandList>(result).commands
+        } catch (error: RpcError) {
+            if (error.code == "method_not_found") return emptyList()
+            throw error
+        }
     }
 
     @Serializable

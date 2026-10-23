@@ -45,7 +45,6 @@ type runtime struct {
 	requests     map[string]*serverRequest // approval id -> request
 	nextReq      int
 	skillCatalog []skill
-	skillsKnown  bool
 
 	// Read-loop state.
 	items      map[string]*model.Item
@@ -101,19 +100,15 @@ func (r *runtime) Prompt(ctx context.Context, in harness.Input) error {
 	}
 	var input []map[string]any
 	text := in.Text
-	if strings.HasPrefix(strings.TrimSpace(text), "/") || strings.HasPrefix(strings.TrimSpace(text), "$") {
-		// Discovery is optional on older app servers; ordinary prompts still work.
-		discovery, cancel := context.WithTimeout(ctx, 5*time.Second)
-		skills, err := r.skills(discovery, false)
-		cancel()
-		if err == nil {
-			var selected map[string]any
-			text, selected = skillInput(text, skills)
-			if selected != nil {
-				input = append(input, selected)
-			}
-		}
+	r.mu.Lock()
+	catalog := r.skillCatalog
+	r.mu.Unlock()
+	var selected map[string]any
+	text, selected = skillInput(text, catalog)
+	if selected != nil {
+		input = append(input, selected)
 	}
+
 	for _, img := range in.Images {
 		input = append(input, map[string]any{"type": "localImage", "path": img.Path})
 	}

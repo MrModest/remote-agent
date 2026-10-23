@@ -175,8 +175,12 @@ type Runtime interface {
 	Close() error
 }
 
-// CommandLister discovers commands in the running session, without a model turn.
-// It may run concurrently with Prompt, Interrupt and Close.
+// CommandDiscovery advertises listing support before an agent is opened.
+type CommandDiscovery interface {
+	SupportsCommands() bool
+}
+
+// CommandLister discovers commands without a turn, concurrently with Prompt, Interrupt and Close.
 type CommandLister interface {
 	Commands(context.Context) ([]model.Command, error)
 }

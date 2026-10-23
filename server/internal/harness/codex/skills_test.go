@@ -93,7 +93,7 @@ func TestReplaySkillCatalogLifecycle(t *testing.T) {
 		wantLookups      int
 		wantPath         string
 	}{
-		{name: "without picker", transcript: "skills.ndjson", wantLookups: 1, wantPath: "prototype/SKILL.md"},
+		{name: "without picker", transcript: "skills.ndjson", wantLookups: 0},
 		{name: "explicit refresh", transcript: "skills-refresh.ndjson", refreshes: 2, wantLookups: 2, wantPath: "refreshed/SKILL.md"},
 		{name: "failed discovery", transcript: "skills-unavailable.ndjson", refreshes: 1, lookupFails: true, wantLookups: 1},
 		{name: "empty catalog", transcript: "skills-empty.ndjson", refreshes: 1, wantLookups: 1},
@@ -143,4 +143,27 @@ func TestReplaySkillCatalogLifecycle(t *testing.T) {
 			replaytest.CloseClean(t, rt)
 		})
 	}
+}
+
+func TestReplayNormalizedSkillWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "codex-rec/ws")
+	if err := os.MkdirAll(workspace, 0755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "workspace-link")
+	if err := os.Symlink(workspace, alias); err != nil {
+		t.Fatal(err)
+	}
+	exe, env := replaytest.Command(t, "testdata/skills.ndjson", root)
+	rt, err := New(config.Command{Command: exe, Env: env}).Open(context.Background(), harness.OpenOptions{Cwd: alias})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands, err := rt.(harness.CommandLister).Commands(context.Background())
+	if err != nil || len(commands) != 2 {
+		t.Fatalf("canonical workspace commands=%v err=%v", commands, err)
+	}
+	replaytest.RunTurn(t, rt, "/prototype", nil)
+	replaytest.CloseClean(t, rt)
 }

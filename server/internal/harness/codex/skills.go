@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -14,60 +15,44 @@ type skill struct {
 	Description string `json:"description"`
 	Path        string `json:"path"`
 	Scope       string `json:"scope"`
-	Enabled     bool   `json:"enabled"`
+	Enabled     *bool  `json:"enabled"`
 	Interface   *struct {
 		ShortDescription string `json:"shortDescription"`
 	} `json:"interface"`
 }
 
-func (r *runtime) skills(ctx context.Context, refresh bool) ([]skill, error) {
-	r.mu.Lock()
-	if !refresh && r.skillsKnown {
-		catalog := r.skillCatalog
-		r.mu.Unlock()
-		return catalog, nil
-	}
-	r.mu.Unlock()
-	catalog, err := r.loadSkills(ctx, refresh)
-	r.mu.Lock()
-	// Even a failed lookup must not be repeated on every Send; reopening the picker retries it.
-	r.skillsKnown = true
-	if err == nil {
-		r.skillCatalog = catalog
-	}
-	r.mu.Unlock()
-	return catalog, err
-}
-
-func (r *runtime) loadSkills(ctx context.Context, refresh bool) ([]skill, error) {
+func (r *runtime) skills(ctx context.Context) ([]skill, error) {
 	var res struct {
 		Data []struct {
 			Cwd    string  `json:"cwd"`
 			Skills []skill `json:"skills"`
 		} `json:"data"`
 	}
-	if err := r.conn.Call(ctx, "skills/list", map[string]any{"cwds": []string{r.cwd}, "forceReload": refresh}, &res); err != nil {
+	if err := r.conn.Call(ctx, "skills/list", map[string]any{"cwds": []string{r.cwd}, "forceReload": true}, &res); err != nil {
 		return nil, err
 	}
 	var out []skill
 	seen := map[string]bool{}
 	for _, group := range res.Data {
-		if group.Cwd != r.cwd {
+		if filepath.Clean(group.Cwd) != filepath.Clean(r.cwd) && resolvedPath(group.Cwd) != resolvedPath(r.cwd) {
 			continue
 		}
 		for _, s := range group.Skills {
-			if !s.Enabled || s.Name == "" || s.Path == "" || seen[s.Name] {
+			if (s.Enabled != nil && !*s.Enabled) || s.Name == "" || s.Path == "" || seen[s.Name] {
 				continue
 			}
 			seen[s.Name] = true
 			out = append(out, s)
 		}
 	}
+	r.mu.Lock()
+	r.skillCatalog = out
+	r.mu.Unlock()
 	return out, nil
 }
 
 func (r *runtime) Commands(ctx context.Context) ([]model.Command, error) {
-	skills, err := r.skills(ctx, true)
+	skills, err := r.skills(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +70,9 @@ func (r *runtime) Commands(ctx context.Context) ([]model.Command, error) {
 // skillInput resolves only a leading explicit invocation, preserving arguments and images.
 func skillInput(text string, skills []skill) (string, map[string]any) {
 	trimmed := strings.TrimLeftFunc(text, unicode.IsSpace)
+	if !strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "$") {
+		return text, nil
+	}
 	for _, s := range skills {
 		for _, prefix := range []string{"/", "$"} {
 			rest, ok := strings.CutPrefix(trimmed, prefix+s.Name)
@@ -94,4 +82,11 @@ func skillInput(text string, skills []skill) (string, map[string]any) {
 		}
 	}
 	return text, nil
+}
+
+func resolvedPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
 }

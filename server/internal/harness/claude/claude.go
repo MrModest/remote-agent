@@ -35,6 +35,8 @@ func New(cmd config.Command) *Harness {
 	return &Harness{cmd: cmd}
 }
 
+func (*Harness) SupportsCommands() bool { return true }
+
 func (h *Harness) ID() string { return "claude" }
 
 var modes = []model.Choice{

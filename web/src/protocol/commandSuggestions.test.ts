@@ -12,3 +12,12 @@ it("matches commands, namespaced skills and descriptions without changing prose 
     expect(commandSuggestions(text, commands)).toEqual([]);
   }
 });
+
+it("ranks exact and prefix names before substring and description matches", () => {
+  const catalog = [
+    { name: "code-check", description: "Review code" },
+    { name: "preview" }, { name: "review-long" }, { name: "review" },
+  ];
+  expect(commandSuggestions("/review", catalog).map((c) => c.name)).toEqual(["review", "review-long", "preview", "code-check"]);
+  expect(commandSuggestions("/proto", [{name:"other",description:"prototype"},{name:"skill:prototype"}])[0].name).toBe("skill:prototype");
+});

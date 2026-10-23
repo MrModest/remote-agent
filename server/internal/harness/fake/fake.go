@@ -46,6 +46,8 @@ import (
 
 type Harness struct{}
 
+func (Harness) SupportsCommands() bool { return true }
+
 func (Harness) ID() string { return "fake" }
 
 func (Harness) Probe(context.Context) model.HarnessInfo {

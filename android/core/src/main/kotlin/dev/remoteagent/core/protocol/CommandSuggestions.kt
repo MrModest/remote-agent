@@ -6,7 +6,16 @@ fun commandQuery(draft: String): String? =
 
 fun commandSuggestions(draft: String, commands: List<SlashCommand>): List<SlashCommand> {
     val query = commandQuery(draft) ?: return emptyList()
-    return commands.distinctBy { it.name }.filter {
-        it.name.lowercase().contains(query) || it.description?.lowercase()?.contains(query) == true
-    }
+    return commands.distinctBy { it.name }.mapNotNull { command ->
+        val name = command.name.lowercase()
+        val short = name.substringAfterLast(':')
+        val rank = when {
+            name == query || short == query -> 0
+            name.startsWith(query) || short.startsWith(query) -> 1
+            name.contains(query) -> 2
+            command.description?.lowercase()?.contains(query) == true -> 3
+            else -> return@mapNotNull null
+        }
+        command to rank
+    }.sortedBy { it.second }.map { it.first }
 }

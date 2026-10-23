@@ -385,7 +385,7 @@ function Composer({
   const [commandsError, setCommandsError] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [commandsDismissed, setCommandsDismissed] = useState(false);
-  const wantsCommands = commandQuery(draft) !== undefined && !archived;
+  const wantsCommands = focused && commandQuery(draft) !== undefined && !archived;
   const connected = store.isConnected;
   const suggestions = focused && !archived && !commandsDismissed ? commandSuggestions(draft, [...commands, ...builtins]) : [];
   const complete = (command: SlashCommand) => {
@@ -402,7 +402,7 @@ function Composer({
     store.commands().then((result) => { if (!cancelled) setCommands(result); })
       .catch(() => { if (!cancelled) setCommandsError(true); })
       .finally(() => { if (!cancelled) setLoadingCommands(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setLoadingCommands(false); };
   }, [store, wantsCommands, connected]);
   useEffect(() => {
     document.getElementById(`command-option-${commandIndex}`)?.scrollIntoView({ block: "nearest" });
@@ -521,7 +521,10 @@ function Composer({
                 }
                 if (e.key === "Escape") { e.preventDefault(); setCommandsDismissed(true); return; }
                 if (e.key === "Enter" || e.key === "Tab") {
-                  e.preventDefault(); complete(suggestions[Math.min(commandIndex, suggestions.length - 1)]); return;
+                  const selected = suggestions[Math.min(commandIndex, suggestions.length - 1)];
+                  if (e.key !== "Enter" || draft !== "/" + selected.name) {
+                    e.preventDefault(); complete(selected); return;
+                  }
                 }
               }
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

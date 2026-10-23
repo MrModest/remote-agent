@@ -157,11 +157,12 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
     val archived = session?.archived == true
 
     var draft by rememberDraft(store)
+    var focused by remember { mutableStateOf(false) }
     val connectionState by connection.state.collectAsStateWithLifecycle()
     var commands by remember(store) { mutableStateOf<List<SlashCommand>>(emptyList()) }
     var loadingCommands by remember(store) { mutableStateOf(false) }
     var commandsError by remember(store) { mutableStateOf(false) }
-    val wantsCommands = commandQuery(draft) != null && !archived
+    val wantsCommands = focused && commandQuery(draft) != null && !archived
     LaunchedEffect(store, wantsCommands, connectionState) {
         if (!wantsCommands || !store.isConnected) return@LaunchedEffect
         commands = emptyList()
@@ -177,7 +178,6 @@ private fun SessionScreen(connection: ServerConnection, store: SessionStore, onB
             loadingCommands = false
         }
     }
-    var focused by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
     var showDiff by rememberSaveable { mutableStateOf(false) }
@@ -618,7 +618,11 @@ private fun Composer(
                                 Key.DirectionDown -> { commandIndex = minOf(commandIndex + 1, suggestions.lastIndex); return@onPreviewKeyEvent true }
                                 Key.DirectionUp -> { commandIndex = maxOf(commandIndex - 1, 0); return@onPreviewKeyEvent true }
                                 Key.Escape -> { commandsDismissed = true; return@onPreviewKeyEvent true }
-                                Key.Enter, Key.Tab -> { complete(suggestions[commandIndex.coerceAtMost(suggestions.lastIndex)]); return@onPreviewKeyEvent true }
+                                Key.Enter, Key.Tab -> {
+                                    val selected = suggestions[commandIndex.coerceAtMost(suggestions.lastIndex)]
+                                    if (it.key == Key.Enter && draft == selected.prompt) onSend() else complete(selected)
+                                    return@onPreviewKeyEvent true
+                                }
                             }
                         }
                         if (it.key == Key.Enter && it.type == KeyEventType.KeyDown && !it.isShiftPressed) {

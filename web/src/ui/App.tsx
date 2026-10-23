@@ -14,7 +14,8 @@ import { Confirm, Empty, Menu } from "./primitives";
 import { navigate, useRoute, useWide, type Route } from "./router";
 import { ServerHome } from "./ServerHome";
 import { CollectionsSidebar, SessionListColumn } from "./ColumnsSidebar";
-import { reconnect, SessionsSidebar, type ServerActions } from "./SessionsSidebar";
+import { reconnect, serverSettingsEntry, SessionsSidebar, type ServerActions } from "./SessionsSidebar";
+import { ServerSettingsView } from "./ServerSettings";
 import { ArchiveConfirm, DeleteConfirm } from "./SessionRow";
 import { useSettings } from "./settings";
 import { collectionSessions, parseCollection, storedCollection, type SessionCollection } from "./sidebarLayout";
@@ -26,6 +27,7 @@ type Sheet =
   | { kind: "pair"; link?: string }
   | { kind: "new"; connection: ServerConnection; projectID?: string }
   | { kind: "settings" }
+  | { kind: "server"; connection: ServerConnection }
   | { kind: "archive"; connection: ServerConnection; session: Session }
   | { kind: "delete"; connection: ServerConnection; session: Session }
   | { kind: "remove"; server: SavedServer }
@@ -85,6 +87,7 @@ function Root() {
     settings: () => setSheet({ kind: "settings" }),
     remove: (s) => setSheet({ kind: "remove", server: s }),
     rename: (s) => setSheet({ kind: "rename", server: s }),
+    serverSettings: (c) => setSheet({ kind: "server", connection: c }),
     newSession: (c, projectID) => setSheet({ kind: "new", connection: c, projectID }),
     archive: (c, s) => setSheet({ kind: "archive", connection: c, session: s }),
     delete: (c, s) => setSheet({ kind: "delete", connection: c, session: s }),
@@ -131,6 +134,11 @@ function Root() {
         </ConnectionContext.Provider>
       )}
       {sheet?.kind === "settings" && <SettingsView onClose={() => setSheet(undefined)} />}
+      {sheet?.kind === "server" && (
+        <ConnectionContext.Provider value={sheet.connection}>
+          <ServerSettingsView onClose={() => setSheet(undefined)} />
+        </ConnectionContext.Provider>
+      )}
       {sheet?.kind === "archive" && <ArchiveConfirm connection={sheet.connection} session={sheet.session} onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "delete" && <DeleteConfirm connection={sheet.connection} session={sheet.session} onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "remove" && (
@@ -268,6 +276,7 @@ function NoServers({ onPair }: { onPair: () => void }) {
 
 /** The server actions, in the top bar of a server's sessions on a phone. */
 function ServerMenu({ connection, actions }: { connection: ServerConnection; actions: ServerActions }) {
+  useObserved(connection); // Server Settings… waits for the connection
   const server = connection.server;
   return (
     <Menu
@@ -276,6 +285,7 @@ function ServerMenu({ connection, actions }: { connection: ServerConnection; act
       entries={[
         { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
         { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
+        serverSettingsEntry(connection, actions),
         { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
         "divider",
         { label: "Settings", icon: Settings, onSelect: actions.settings },

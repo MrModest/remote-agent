@@ -2,9 +2,10 @@
 # Walks the Android app through the fake harness on an emulator, as
 # web/e2e/smoke.mjs does the web client: pairing by deep link, a new worktree
 # session, the fake keywords, images, changes and revert, the terminal, a
-# tablet's sidebar, the dark theme. Saves screenshots to $SCRATCH/shots and
-# removes the server at the end, which unpairs it. Never point it at the
-# developer's rad.
+# tablet's sidebar, the dark theme, and the server's settings (updating and
+# signing in the fake agent, naming sessions with it). Saves screenshots to
+# $SCRATCH/shots and removes the server at the end, which unpairs it. Never
+# point it at the developer's rad.
 #
 #   export ANDROID_HOME=… SCRATCH=…    # $SCRATCH/radhome: a scratch rad on 127.0.0.1:7499 with fake: true
 #   android/e2e/smoke.sh               # $SCRATCH/root/proj: a git repo under its roots
@@ -152,6 +153,57 @@ tap 'text=Dark'; sleep 2
 shot 08-settings-dark
 tap 'text=System'; sleep 2
 "$A" shell input keyevent KEYCODE_BACK; sleep 1
+
+step "server settings"
+# A turn that fails as a signed-out agent's would signs the fake agent out.
+tap 'text=write smoke.txt' || fail "no smoke session"
+wait_for 'id=composer' 10 || fail "the session didn't open"
+fill 'id=composer' 'logout'; tap 'id=send'
+wait_for 'contains=Invalid API key' 15 || fail "logout didn't fail the turn"
+hide_keyboard; tap 'desc=Back'; sleep 1
+tap 'desc=More'; sleep 0.5; tap 'text=Server Settings…'
+wait_for 'id=server-settings' 10 || fail "no server settings"
+wait_for 'id=sign-in-fake' 15 || fail "Fake isn't shown signed out"
+shot 09-server-settings
+
+step "update an agent"
+# Only the fake agent: the others' updaters and sign-ins are real.
+tap 'id=agent-menu-fake'; sleep 0.5; tap 'text=Update'
+wait_for 'contains=Fake is up to date.' 15 || fail "no update output"
+wait_for 'contains=Fake (scripted) 1' 10 || fail "the update didn't finish"
+tap 'id=task-done'; sleep 0.5
+
+step "sign in"
+tap 'id=sign-in-fake'
+wait_for 'id=task-code' 10 || fail "no code field"
+find_view 'id=open-sign-in' > /dev/null || fail "no sign-in page button"
+shot 10-sign-in
+fill 'id=task-code' 'abc123'; tap 'id=task-send'
+wait_for 'text=Signed in.' 15 || fail "not signed in"
+hide_keyboard; shot 11-signed-in
+tap 'id=task-done'; sleep 1
+! find_view 'id=sign-in-fake' > /dev/null || fail "Fake still shows Sign In"
+
+step "system agent"
+tap 'id=system-agent'; sleep 0.5; tap 'text=Fake (scripted)'
+wait_for 'id=system-model' 10 || fail "the system agent wasn't saved"
+tap 'desc=Done'; sleep 0.5
+tap 'id=new-session'
+wait_for 'id=project-picker' 10 || fail "no new session sheet"
+tap 'id=project-picker'; sleep 0.5; tap "text=$PROJECT"; sleep 0.5
+tap 'id=harness-fake'; sleep 0.3
+"$A" shell input swipe 540 1800 540 500 300; sleep 0.5
+fill 'id=new-prompt' 'tidy up the readme please'; hide_keyboard
+tap 'id=start'
+wait_for 'contains=Named: tidy up the readme' 20 || fail "the system agent didn't name the session"
+shot 12-named-session
+tap 'desc=Back'; sleep 1
+# None again, so that a session's title is its prompt, as the steps above expect.
+tap 'desc=More'; sleep 0.5; tap 'text=Server Settings…'
+wait_for 'id=system-agent' 10 || fail "no server settings"
+tap 'id=system-agent'; sleep 0.5; tap 'text=None'; sleep 1
+find_view 'id=system-model' > /dev/null && fail "the system agent wasn't unset"
+tap 'desc=Done'; sleep 0.5
 
 step "remove the server"
 tap 'desc=More'; sleep 0.5; tap 'text=Remove server'; sleep 0.5; tap 'text=Remove'; sleep 2

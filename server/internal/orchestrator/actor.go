@@ -139,6 +139,10 @@ func (a *actor) prompt(ctx context.Context, text string, refs []model.ImageRef, 
 	}); err != nil {
 		return nil, err
 	}
+	if retitle {
+		ws := a.sess.Workspace
+		a.o.nameSession(a.sess.ID, a.projectName(), text, true, ws.Kind == model.WorkspaceWorktree && isProvisional(ws.Branch, a.sess.ID))
+	}
 	a.lastActive = time.Now()
 	attrs := []any{"chars", utf8.RuneCountInString(text), "lines", strings.Count(text, "\n") + 1}
 	if len(refs) > 0 {
@@ -153,6 +157,13 @@ func (a *actor) prompt(ctx context.Context, text string, refs []model.ImageRef, 
 		return &cp, nil
 	}
 	return it, a.startTurn(ctx, q)
+}
+
+func (a *actor) projectName() string {
+	if a.project == nil {
+		return ""
+	}
+	return a.project.Name
 }
 
 // logAttrs describes the session for the log, leaving out the conversation:
@@ -182,6 +193,9 @@ func (a *actor) logAttrs(extra ...any) []any {
 func (a *actor) startTurn(ctx context.Context, q queuedPrompt) error {
 	if a.rt == nil {
 		if err := a.open(ctx); err != nil {
+			if harness.IsAuthError(err.Error()) {
+				a.o.reg.SignedOut(a.sess.Harness, "Signed out: "+err.Error())
+			}
 			q.item.Status = model.ItemFailed
 			e := a.newItem(model.ItemError, model.ItemCompleted)
 			e.Text = "Could not start " + a.sess.Harness + ": " + err.Error()
@@ -607,6 +621,13 @@ func (a *actor) endTurn(ctx context.Context, ev harness.TurnEnded) {
 	a.lastActive = time.Now()
 	a.syncStatus()
 	a.logTurnEnd(turn)
+	switch {
+	case ev.Status == model.TurnFailed && harness.IsAuthError(ev.Error):
+		line, _, _ := strings.Cut(strings.TrimSpace(ev.Error), "\n")
+		a.o.reg.SignedOut(a.sess.Harness, "Signed out: "+line)
+	case ev.Status == model.TurnCompleted:
+		a.o.reg.SignedIn(a.sess.Harness)
+	}
 	a.write(ctx, func(w *store.W) error {
 		for _, it := range changed {
 			if err := a.putItem(w, it); err != nil {

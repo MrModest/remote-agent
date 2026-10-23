@@ -48,3 +48,39 @@ func TestInputCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAuthError(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"Invalid API key · Please run /login": true,
+		`Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}`: true,
+		"Your access token could not be refreshed. Please log out and sign in again.":                                                          true,
+		"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header":                                                 true,
+		"fake failure requested":    false,
+		"API Error: 529 Overloaded": false,
+	} {
+		if got := IsAuthError(msg); got != want {
+			t.Errorf("IsAuthError(%q) = %v", msg, got)
+		}
+	}
+}
+
+func TestSignedOut(t *testing.T) {
+	r := NewRegistry(stub{model.HarnessInfo{ID: "x", Installed: true, AuthOK: true}})
+	ctx := context.Background()
+	h, _ := r.Get("x")
+	if info := r.Info(ctx, h, false); !info.AuthOK {
+		t.Fatalf("fresh: %+v", info)
+	}
+	r.SignedOut("x", "Signed out: token expired")
+	if info := r.Info(ctx, h, false); info.AuthOK || info.Hint != "Signed out: token expired" {
+		t.Fatalf("signed out: %+v", info)
+	}
+	// A probe can't tell an expired token, so it stays until the agent signs in.
+	if info := r.Info(ctx, h, true); info.AuthOK {
+		t.Fatalf("after a probe: %+v", info)
+	}
+	r.SignedIn("x")
+	if info := r.Info(ctx, h, false); !info.AuthOK || info.Hint != "" {
+		t.Fatalf("signed in: %+v", info)
+	}
+}

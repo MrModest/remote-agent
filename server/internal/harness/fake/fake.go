@@ -13,6 +13,10 @@
 //	"markdown" reply with Markdown: lists, a code block, a quote and a table
 //	"background [duration]" leave a task running in the background (5s by
 //	           default), then start a turn of its own to report on it
+//	"logout"   fail the turn as an agent whose login expired does
+//
+// As the system agent, it names sessions after their first words; its update
+// and login commands are scripts (maintenance.go).
 //
 // "/compact" stands in for an agent's compaction: a notice, and less context
 // in use.
@@ -237,6 +241,10 @@ func (r *runtime) turn(ctx context.Context, n int, text string, images int) {
 
 	if strings.Contains(text, "fail") {
 		end(model.TurnFailed, "fake failure requested")
+		return
+	}
+	if strings.Contains(text, "logout") {
+		end(model.TurnFailed, "Invalid API key · Please run /login")
 		return
 	}
 

@@ -11,6 +11,7 @@ Drive coding agents running on your computer from your iPhone, iPad, Mac, an And
   - approve or deny tool calls
   - answer the agent's questions
   - review per-turn git diffs and revert them
+  - update rad and the agents, and sign an agent in again, without going to the computer
   - get a notification on the Mac when a session needs you or finishes
 - **Web client**: the same app for a browser, in `web/` (React and TypeScript). In a wide window it has the iPad's sidebar of every server's sessions. For now you run it from its dev server on your computer; see [Running the web client](#running-the-web-client).
 - **Android app**: the same app, native, for Android 16 or later, in `android/` (Kotlin and Jetpack Compose). On a tablet, as on iPad, one sidebar lists every server's sessions next to the one you have open. See [Installing the app on Android](#installing-the-app-on-android).
@@ -97,6 +98,7 @@ rad update             # install it
 - **In a terminal:** restart `rad serve` yourself.
 - **Development builds:** a build from source (`rad version` says `dev`) isn't replaced without `--force`.
 - **Remote Agent Server app:** the app updates itself, and its rad, from its menu, below.
+- **From the apps:** a server's **Server Settings…** updates rad too (see [Managing a server from the apps](#managing-a-server-from-the-apps)).
 
 ## Running rad as a Mac app
 
@@ -125,8 +127,9 @@ The menu shows whether rad is running, its addresses and the agents it found:
 - **Pair a Device…** shows the pairing QR code.
 - **Start at Login** replaces `rad install-service`. If that service is installed, the menu offers to remove it, since only one rad can serve a config at a time.
 - **Open Log** opens `~/Library/Logs/Remote Agent Server/rad.log`.
-- **Check for Updates…**: the app updates itself, with the rad inside it, from this repository's releases. It checks once a day; a newer release shows in the menu as **Update to …**, which shows what's new and installs it.
+- **Check for Updates…**: the app updates itself, with the rad inside it, from this repository's releases. It checks once a day and downloads a newer release by itself; the menu then offers **Install … and Restart…**, and otherwise it installs when you quit the app. **Check for Updates…** shows what's new and installs it.
   - Installing restarts the app, and so rad. If that would interrupt a session, the app asks first. Choose **Later**, and the update installs when you quit the app, or when you choose **Install … and Restart…**.
+  - **Server Settings…** in the apps installs it from your phone: rad asks the app, which installs without asking, as you aren't at the Mac. The apps warn you first about sessions it would interrupt.
   - Each release is signed like the last, so macOS keeps the app's permissions.
   - Builds from Xcode (version `0.1`) offer no updates.
 - Quitting the app stops rad and its agents.
@@ -268,7 +271,21 @@ Or open http://localhost:5173, choose **Pair a server** and paste the link that 
 - **Queued prompts:** a prompt sent while the agent works waits, marked *Queued*, and goes out when the turn ends. *Send now* under it stops the turn and sends that prompt at once, ahead of any others waiting. Stop cancels them all.
 - **Text size:** Settings has two sizes: one for the interface, such as lists and labels, and one for messages: your prompts, the agent's replies and its tool calls. On the Mac it is under Remote Agent › Settings… (⌘,). On iPhone, tap the gear on the server list or open a server's ⋯ menu; on iPad, open the ⋯ menu above the sidebar. On iOS the interface follows the system's text size until you turn off **Match System**.
   - On the Mac, Settings also picks the messages' font, from the system font's designs or any installed family, and a code font from the installed fixed-width ones. The code font is used for code in messages, tool calls and diffs.
+- **Server Settings:** see [Managing a server from the apps](#managing-a-server-from-the-apps).
 - **Colours:** the apps use [Catppuccin](https://catppuccin.com): Frappé in dark mode, Latte in light mode, with mauve as the accent. They follow the system's appearance, or Settings › Theme keeps them light or dark.
+
+## Managing a server from the apps
+
+A server's menu has **Server Settings…**: in the sidebar, a server's ⋯ or right-click menu; on iPhone and Android phones, the ⋯ menu of its list of sessions.
+
+- **rad:** its version, and whether a newer release is out. **Update to …** installs it, and rad restarts: in place, as the same process (so a background service carries on), or, under the Remote Agent Server app, with the app. The apps reconnect by themselves. A restart interrupts the turns that run, so the apps say which sessions are busy and ask first.
+  - A development build, or a rad that can't replace its own binary (in a folder that isn't yours, or inside an app bundle without the app), says so instead.
+- **Agents:** each one's version, and whether it's signed in. **Update** runs the agent's own updater on the computer (`claude update`, `codex update`, `pi update`, `cursor-agent update`, `opencode upgrade`) and shows what it printed.
+  - **Sign In** shows when an agent isn't signed in, and **Sign In Again** in its ⋯ menu otherwise. It runs the agent's sign-in on the computer (`claude auth login`, `codex login --device-auth`, `cursor-agent login`) without opening a browser there, and shows its sign-in page as a button: open it on your phone. Claude's page then gives you a code to paste back in the app; Codex shows a code to enter on its page; Cursor needs nothing more.
+  - rad can't always tell that a login expired. When a turn fails because the agent isn't signed in, the agent shows as signed out until it signs in again or a turn of its works.
+  - `update` and `login` in the config replace these commands, or add them for an agent without one (see [Configuration](#configuration)).
+- **System Agent:** the agent and model that name new sessions. From the first prompt, it gives the session a short title and its worktree a branch name such as `ra/fix-login-redirect`, a few seconds after the session starts with names taken from the prompt. A title or branch you chose is kept. Pick a small, fast model, such as Claude's Haiku. With **None**, a session's title is its prompt's first line.
+  - The calls leave nothing with the agent: no session, no history, no tools. Claude Code runs `claude -p --no-session-persistence --safe-mode --tools ""`, Codex `codex exec --ephemeral` in a read-only sandbox, and Pi `pi --print --no-session --no-tools`, each in an empty folder that rad removes afterwards. ACP agents can't be the system agent, as ACP has no such call.
 
 ## CLI
 
@@ -310,6 +327,8 @@ harness:
   codex: {command: codex}
   pi: {command: pi}             # e.g. args: [-e, /path/to/extension.ts] to load an extension
 ```
+
+Each agent, built in or ACP, also takes `update` and `login`: the commands the apps run to update it and to sign it in again, such as `update: [npm, i, -g, "@google/gemini-cli@latest"]`. They replace the built-in ones; `[]` turns one off. Cursor and OpenCode have them built in, as `command` names them.
 
 Unknown keys are errors, so a typo stops rad with the line number rather than being ignored.
 
@@ -379,9 +398,12 @@ To exercise the UI without spending tokens, run `rad serve --fake` and pick **Fa
 - `picture`: writes `picture-<turn>.png` in the working directory and shows it in the reply, as agents are told to
 - `markdown`: adds Markdown to the reply: a heading, lists, a task list, a code block, a quote and a table
 - `background [duration]`: leaves a task running in the background (5s by default, or for example `background 1m`), then starts a turn of its own to report on it
+- `logout`: fails the turn as an agent whose login expired does, so Server Settings shows Fake as signed out
 - `/compact`: marks the transcript with *Context compacted* and reports less context in use
 
 It also says how many images came with a prompt. `rad debug run --image shot.png "…"` attaches one from the command line.
+
+In Server Settings, Fake's **Update** prints a progress line and finishes in a second, and its **Sign In** shows a link and asks for a code: any code signs it in. As the system agent, it names a session "Named: " and the prompt's first words.
 
 To release, push a tag such as `v0.2.0`. [`.github/workflows/release.yml`](.github/workflows/release.yml) runs the server tests, builds rad for Linux and macOS, both Mac apps for Apple silicon and the Android app, and publishes them as that tag's release with a `SHA256SUMS` file. A tag with a hyphen, such as `v0.3.0-beta.1`, becomes a prerelease.
 

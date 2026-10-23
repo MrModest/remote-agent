@@ -43,6 +43,10 @@ type Orchestrator struct {
 	mu       sync.Mutex
 	actors   map[string]*actor
 	inflight map[string]*sync.Mutex
+
+	bg     context.Context // the system agent's calls; cancelled by Shutdown
+	stopBg context.CancelFunc
+	naming sync.WaitGroup
 }
 
 func New(st *store.Store, reg *harness.Registry, opt Options) *Orchestrator {
@@ -52,7 +56,9 @@ func New(st *store.Store, reg *harness.Registry, opt Options) *Orchestrator {
 	if opt.IdleTimeout == 0 {
 		opt.IdleTimeout = 30 * time.Minute
 	}
-	return &Orchestrator{st: st, reg: reg, opt: opt, log: opt.Log, actors: map[string]*actor{}, inflight: map[string]*sync.Mutex{}}
+	bg, stopBg := context.WithCancel(context.Background())
+	return &Orchestrator{st: st, reg: reg, opt: opt, log: opt.Log, actors: map[string]*actor{}, inflight: map[string]*sync.Mutex{},
+		bg: bg, stopBg: stopBg}
 }
 
 func (o *Orchestrator) Registry() *harness.Registry { return o.reg }
@@ -192,7 +198,7 @@ func (o *Orchestrator) CreateSession(ctx context.Context, p CreateSessionParams)
 		}
 		branch := p.Workspace.Branch
 		if branch == "" {
-			branch = "ra/" + slug(s.Title) + "-" + s.ID[len(s.ID)-6:]
+			branch = provisionalBranch(s.Title, s.ID)
 		}
 		dir := filepath.Join(o.opt.WorktreesDir, proj.ID, s.ID)
 		if err := gitx.AddWorktree(ctx, proj.Path, dir, branch, p.Workspace.BaseRef); err != nil {
@@ -220,6 +226,7 @@ func (o *Orchestrator) CreateSession(ctx context.Context, p CreateSessionParams)
 		if _, err := o.Prompt(ctx, s.ID, p.Prompt, p.Images, cmd); err != nil {
 			o.log.Warn("initial prompt failed", "session", s.ID, "err", err)
 		}
+		o.nameSession(s.ID, proj.Name, p.Prompt, p.Title == "", s.Workspace.Kind == model.WorkspaceWorktree && p.Workspace.Branch == "")
 	}
 	return s, nil
 }
@@ -451,8 +458,10 @@ func (o *Orchestrator) Run(ctx context.Context) {
 	}
 }
 
-// Shutdown stops every runtime.
+// Shutdown stops every runtime, and the system agent.
 func (o *Orchestrator) Shutdown() {
+	o.stopBg()
+	defer o.naming.Wait()
 	o.mu.Lock()
 	actors := make([]*actor, 0, len(o.actors))
 	for _, a := range o.actors {

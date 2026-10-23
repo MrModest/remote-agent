@@ -30,6 +30,20 @@ private struct AgentsLine: Decodable {
     let agents: [AgentInfo]
 }
 
+/// rad asks for the app's latest release, for a client (server.update).
+private struct UpdateLine: Decodable {
+    let version: String?
+}
+
+/// A line for rad's stdin: how an update a client asked for goes.
+struct UpdateStatus: Encodable {
+    var event = "updateStatus"
+    /// checking, downloading, installing (the app quits next), upToDate or failed.
+    var status: String
+    var version: String?
+    var message: String?
+}
+
 /// Runs rad as this app's child, so macOS attributes rad and every agent it
 /// starts to this app when it asks for permissions. Restarts rad if it dies,
 /// and stops it when the app quits.
@@ -73,6 +87,8 @@ final class RadSupervisor {
     @ObservationIgnored private var restartDelay: TimeInterval = 1
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var activity: NSObjectProtocol?
+    /// Called when a client asks rad to update, with the version rad found.
+    @ObservationIgnored var onUpdateRequest: ((String?) -> Void)?
 
     /// rad or a start is under way.
     var isActive: Bool { process != nil || launching }
@@ -144,9 +160,18 @@ final class RadSupervisor {
             state = .running
         case "agents":
             agents = (try? JSONDecoder().decode(AgentsLine.self, from: line))?.agents
+        case "update":
+            onUpdateRequest?((try? JSONDecoder().decode(UpdateLine.self, from: line))?.version)
         default:
             break
         }
+    }
+
+    /// Tells rad how its update goes, on its stdin.
+    func send(_ status: UpdateStatus) {
+        guard let lifeline, var line = try? JSONEncoder().encode(status) else { return }
+        line.append(UInt8(ascii: "\n"))
+        try? lifeline.fileHandleForWriting.write(contentsOf: line)
     }
 
     private func exited(_ status: Int32, _ reason: Process.TerminationReason) {

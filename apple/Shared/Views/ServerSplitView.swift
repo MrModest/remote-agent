@@ -19,6 +19,7 @@ struct ServerSplitView: View {
     @State private var archiving: SessionRequest?
     @State private var deleting: SessionRequest?
     @State private var removing: SavedServer?
+    @State private var managing: ServerRequest?
     #if os(macOS)
     @Environment(Notifier.self) private var notifier
     #endif
@@ -71,12 +72,17 @@ struct ServerSplitView: View {
                 startSession: { newSession = $0 },
                 archive: { archiving = $0 },
                 delete: { deleting = $0 },
-                remove: { removing = $0 }))
+                remove: { removing = $0 },
+                manage: { managing = ServerRequest(connection: $0) }))
             .sheet(item: $newSession) { request in
                 NewSessionView(connection: request.connection, projectID: request.projectID) { session in
                     selection.wrappedValue = SessionRoute(serverID: request.connection.server.id, sessionID: session.id)
                 }
                 .appStyle()
+            }
+            .sheet(item: $managing) { request in
+                ServerSettingsView(connection: request.connection)
+                    .appStyle()
             }
             .sheet(isPresented: $showAdd) {
                 AddServerView(initialLink: pendingLink) { _ in }

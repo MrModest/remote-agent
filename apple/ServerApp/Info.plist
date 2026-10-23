@@ -38,6 +38,8 @@
 	<string>Your agents can work with files on network volumes.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>Your agents can work with files on external drives.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

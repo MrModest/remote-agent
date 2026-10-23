@@ -341,6 +341,12 @@ public struct HarnessCaps: Codable, Hashable, Sendable {
     public var setMode: Bool
     public var freeModel: Bool
     public var modelSelect: Bool
+    /// `harness.update` runs the agent's own updater.
+    public var update: Bool?
+    /// `harness.login` signs the agent in again.
+    public var login: Bool?
+    /// The agent can be the system agent (`ServerSettings`).
+    public var oneShot: Bool?
 }
 
 public struct HarnessInfo: Codable, Hashable, Identifiable, Sendable {
@@ -428,4 +434,94 @@ public struct TerminalMessage: Codable, Hashable, Sendable {
         self.cols = cols
         self.rows = rows
     }
+}
+
+/// The agent, and its model, that names sessions and their worktree branches.
+public struct SystemAgent: Codable, Hashable, Sendable {
+    public var harness: String
+    public var model: String?
+    public var effort: String?
+
+    public init(harness: String, model: String? = nil, effort: String? = nil) {
+        self.harness = harness
+        self.model = model
+        self.effort = effort
+    }
+}
+
+/// The settings clients change on a server (`server.settings`).
+public struct ServerSettings: Codable, Hashable, Sendable {
+    public var systemAgent: SystemAgent?
+
+    public init(systemAgent: SystemAgent? = nil) {
+        self.systemAgent = systemAgent
+    }
+}
+
+/// What `server.checkUpdate` found out about rad's releases.
+public struct UpdateInfo: Codable, Hashable, Sendable {
+    public var current: String
+    /// nil: the lookup failed, and `reason` says why.
+    public var latest: String?
+    /// The latest release's page.
+    public var url: String?
+    /// `latest` is newer than `current`.
+    public var available: Bool
+    /// How an update installs: "rad" or "app"; nil: it can't, and `reason` says why.
+    public var via: String?
+    public var reason: String?
+    /// The sessions a restart would interrupt.
+    public var busy: [String]
+
+    enum CodingKeys: String, CodingKey { case current, latest, url, available, via, reason, busy }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        current = try c.decode(String.self, forKey: .current)
+        latest = try c.decodeIfPresent(String.self, forKey: .latest)
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        via = try c.decodeIfPresent(String.self, forKey: .via)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        busy = try c.decodeIfPresent([String].self, forKey: .busy) ?? []
+    }
+
+    /// Whether the client can install `latest`.
+    public var installable: Bool { available && !(via ?? "").isEmpty }
+}
+
+/// A maintenance job on the server: updating rad or an agent, or signing an
+/// agent in. Clients poll it (`task.get`) while it runs.
+public struct ServerTask: Codable, Hashable, Identifiable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case updateServer = "update_server", updateAgent = "update_agent", login, unknown
+        public init(from decoder: Decoder) throws {
+            self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    public enum Status: String, Codable, Sendable {
+        case running, succeeded, failed, cancelled, unknown
+        public init(from decoder: Decoder) throws {
+            self = Status(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    public var id: String
+    public var kind: Kind
+    public var harness: String?
+    public var status: Status
+    /// What the command printed, as a terminal shows it, without colours.
+    public var output: String
+    /// The last web address in the output, such as a sign-in page.
+    public var url: String?
+    /// It takes typed lines now (`task.input`), such as a code to paste.
+    public var input: Bool?
+    public var error: String?
+    /// For an update, the version installed.
+    public var version: String?
+    public var startedAt: Date
+    public var endedAt: Date?
+
+    public var isRunning: Bool { status == .running }
 }

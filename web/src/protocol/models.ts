@@ -249,6 +249,12 @@ export interface HarnessCaps {
   setMode: boolean;
   freeModel: boolean;
   modelSelect: boolean;
+  /** `harness.update` runs the agent's own updater. Older servers leave it out. */
+  update?: boolean;
+  /** `harness.login` signs the agent in again. */
+  login?: boolean;
+  /** The agent can be the system agent (`ServerSettings`). */
+  oneShot?: boolean;
 }
 
 export interface HarnessInfo {
@@ -275,6 +281,65 @@ export function usable(h: HarnessInfo): boolean {
 /** The reasoning efforts to offer for a model (undefined or unlisted: the default model). */
 export function effortsForModel(h: HarnessInfo, model: string | undefined): Choice[] {
   return h.models?.find((m) => m.id === model)?.efforts ?? h.efforts ?? [];
+}
+
+/** The agent, and its model, that names sessions and their worktree branches. */
+export interface SystemAgent {
+  harness: string;
+  model?: string;
+  effort?: string;
+}
+
+/** The settings clients change on a server (`server.settings`). */
+export interface ServerSettings {
+  /** Absent: none, and a session's title is its prompt's first line. */
+  systemAgent?: SystemAgent;
+}
+
+/** What `server.checkUpdate` found out about rad's releases. */
+export interface UpdateInfo {
+  current: string;
+  /** Absent: the lookup failed, and `reason` says why. */
+  latest?: string;
+  /** The latest release's page. */
+  url?: string;
+  /** `latest` is newer than `current`. */
+  available: boolean;
+  /** How an update installs; absent: it can't, and `reason` says why. */
+  via?: Open<"rad" | "app">;
+  reason?: string;
+  /** The titles of the sessions a restart would interrupt. */
+  busy: string[];
+}
+
+/** Whether the client can have rad install `latest`. */
+export function installable(u: UpdateInfo): boolean {
+  return u.available && !!u.via;
+}
+
+export type TaskKind = Open<"update_server" | "update_agent" | "login">;
+export type TaskStatus = Open<"running" | "succeeded" | "failed" | "cancelled">;
+
+/** A maintenance job on the server: updating rad or an agent, or signing an
+ *  agent in. Clients poll it (`task.get`) while it runs. */
+export interface ServerTask {
+  id: string;
+  kind: TaskKind;
+  /** The agent, for update_agent and login. */
+  harness?: string;
+  /** Anything but running has ended; an unknown status counts as failed. */
+  status: TaskStatus;
+  /** What the command printed, as a terminal shows it, without colours. */
+  output: string;
+  /** The last web address in the output, such as a sign-in page. */
+  url?: string;
+  /** It takes typed lines now (`task.input`), such as a code to paste. */
+  input?: boolean;
+  error?: string;
+  /** For an update, the version installed; for a login, the agent's. */
+  version?: string;
+  startedAt: string;
+  endedAt?: string;
 }
 
 export interface FSEntry {

@@ -181,6 +181,47 @@ type Harness interface {
 	Open(ctx context.Context, o OpenOptions) (Runtime, error)
 }
 
+// OneShotter is implemented by harnesses that can be the system agent,
+// which names sessions: they answer one prompt without tools, in an empty
+// folder, and keep nothing of the conversation, so it shows up in neither
+// the agent's history nor its sessions.
+type OneShotter interface {
+	OneShot(ctx context.Context, o OneShotOptions) (string, error)
+}
+
+type OneShotOptions struct {
+	Cwd    string // an empty folder, removed afterwards
+	Model  string // empty: the harness's default
+	Effort string
+	Prompt string
+}
+
+// Command is a command line, with the variables to add to and remove from
+// rad's environment for it.
+type Command struct {
+	Args  []string
+	Env   map[string]string
+	Unset []string
+}
+
+// Maintainer is implemented by harnesses whose CLI can update itself, or
+// sign in again, from a command. rad runs them in a pseudo-terminal, so the
+// user can answer them, such as by pasting a code. ok is false for one the
+// CLI doesn't have.
+type Maintainer interface {
+	UpdateCommand() (cmd Command, ok bool)
+	LoginCommand() (cmd Command, ok bool)
+}
+
+// Configured returns the command a config sets, if it sets one: an empty
+// list turns it off. Otherwise it returns def, which may be nil (none).
+func Configured(configured, def []string) ([]string, bool) {
+	if configured != nil {
+		return configured, len(configured) > 0
+	}
+	return def, len(def) > 0
+}
+
 // Overlayer is implemented by harnesses that learn details (modes, models)
 // from live sessions; the registry applies it on top of cached probes.
 type Overlayer interface {
@@ -194,6 +235,10 @@ type Registry struct {
 	list []Harness
 	mu   sync.Mutex
 	info map[string]cachedInfo
+	// signedOut holds why an agent's turn failed for want of a login, which
+	// a probe may not see, such as an expired token. It lasts until the
+	// agent signs in, or a turn of its completes.
+	signedOut map[string]string
 }
 
 type cachedInfo struct {
@@ -202,7 +247,7 @@ type cachedInfo struct {
 }
 
 func NewRegistry(hs ...Harness) *Registry {
-	return &Registry{list: hs, info: map[string]cachedInfo{}}
+	return &Registry{list: hs, info: map[string]cachedInfo{}, signedOut: map[string]string{}}
 }
 
 func (r *Registry) Get(id string) (Harness, bool) {
@@ -244,15 +289,74 @@ func (r *Registry) Info(ctx context.Context, h Harness, refresh bool) model.Harn
 		if o, ok := h.(Overlayer); ok {
 			o.Overlay(&c.info)
 		}
-		return c.info
+		return r.withLogin(c.info)
 	}
 	pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	info := h.Probe(pctx)
+	setCaps(h, &info)
 	r.mu.Lock()
 	r.info[h.ID()] = cachedInfo{info, time.Now()}
 	r.mu.Unlock()
+	return r.withLogin(info)
+}
+
+// withLogin marks an agent whose turn failed for want of a login.
+func (r *Registry) withLogin(info model.HarnessInfo) model.HarnessInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if why := r.signedOut[info.ID]; why != "" && info.Installed && info.AuthOK {
+		info.AuthOK, info.Hint = false, why
+	}
 	return info
+}
+
+// SignedOut records that the agent needs to sign in again, as a turn's
+// error said.
+func (r *Registry) SignedOut(id, why string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.signedOut[id] = why
+}
+
+// SignedIn forgets SignedOut: the agent signed in, or worked.
+func (r *Registry) SignedIn(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.signedOut, id)
+}
+
+// authErrors are what agents say, in lower case, when they have no login
+// or it expired.
+var authErrors = []string{
+	"/login", "authentication_error", "oauth token has expired", "token has expired", "not logged in",
+	"invalid api key", "401 unauthorized", "api error: 401", "status 401", "could not be refreshed",
+	"codex login", "log in again", "sign in again", "please log in", "please login", "authentication required",
+}
+
+// IsAuthError reports whether an agent's error says it has to sign in
+// (again).
+func IsAuthError(msg string) bool {
+	msg = strings.ToLower(msg)
+	for _, p := range authErrors {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// setCaps adds what the harness implements beyond sessions, once it is
+// installed.
+func setCaps(h Harness, info *model.HarnessInfo) {
+	if !info.Installed {
+		return
+	}
+	if m, ok := h.(Maintainer); ok {
+		_, info.Caps.Update = m.UpdateCommand()
+		_, info.Caps.Login = m.LoginCommand()
+	}
+	_, info.Caps.OneShot = h.(OneShotter)
 }
 
 var effortNames = map[string]string{"xhigh": "Extra high"}

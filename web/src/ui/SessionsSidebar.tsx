@@ -1,4 +1,4 @@
-import { Ellipsis, FolderMinus, Hand, Pencil, Plus, RefreshCw, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
+import { Ellipsis, FolderMinus, Hand, Pencil, Plus, RefreshCw, ServerCog, Settings, SquarePen, Trash2, WifiOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { Session } from "../protocol/models";
 import { useObserved, useObservedAll } from "../store/observable";
@@ -22,6 +22,8 @@ export interface ServerActions {
   delete: (c: ServerConnection, s: Session) => void;
   rename: (s: SavedServer) => void;
   remove: (s: SavedServer) => void;
+  /** The server's own settings: rad's updates, its agents, the system agent. */
+  serverSettings: (c: ServerConnection) => void;
 }
 
 /** Tries to connect again, and, as pulling to refresh in the apps, looks for newly installed agents. */
@@ -164,9 +166,15 @@ export function serverMenuEntries(connection: ServerConnection, actions: ServerA
     { label: `New session on ${server.name}`, icon: SquarePen, disabled: connection.state.kind !== "connected", onSelect: () => actions.newSession(connection) },
     { label: "Reconnect", icon: RefreshCw, onSelect: () => reconnect(connection) },
     { label: "Rename…", icon: Pencil, onSelect: () => actions.rename(server) },
+    serverSettingsEntry(connection, actions),
     "divider",
     { label: `Remove ${server.name}…`, icon: Trash2, destructive: true, onSelect: () => actions.remove(server) },
   ];
+}
+
+/** Opens the server's settings, which need it connected. */
+export function serverSettingsEntry(connection: ServerConnection, actions: ServerActions): MenuEntry {
+  return { label: "Server Settings…", icon: ServerCog, disabled: connection.state.kind !== "connected", onSelect: () => actions.serverSettings(connection) };
 }
 
 /** A server as a section header: its name and connection, and while its

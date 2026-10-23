@@ -164,6 +164,32 @@ func (p *Proc) Stop(grace time.Duration) {
 	}
 }
 
+// Run runs a command to completion, with stdin as its input, and returns
+// its output. An error carries the end of what it wrote to stderr. When ctx
+// ends, the command's process group is killed.
+func Run(ctx context.Context, s Spec, stdin string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, s.Command, s.Args...)
+	cmd.Dir = s.Dir
+	cmd.Env = buildEnv(os.Environ(), s.Env, s.UnsetEnv)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout bytes.Buffer
+	stderr := &tailBuffer{max: 4 << 10}
+	cmd.Stdout, cmd.Stderr = &stdout, stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return stdout.Bytes(), ctx.Err()
+		}
+		if tail := strings.TrimSpace(stderr.String()); tail != "" {
+			return stdout.Bytes(), fmt.Errorf("%w: %s", err, lastLines(tail, 3))
+		}
+		return stdout.Bytes(), err
+	}
+	return stdout.Bytes(), nil
+}
+
 // Version runs `command args...` and returns the first output line.
 func Version(ctx context.Context, command string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

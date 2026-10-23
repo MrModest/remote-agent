@@ -1,0 +1,26 @@
+{
+  "id": 11,
+  "result": {
+    "tasks": [
+      {
+        "id": "k2",
+        "kind": "update_agent",
+        "harness": "codex",
+        "status": "succeeded",
+        "output": "$ codex update\nCodex 0.163.0 → 0.164.0",
+        "version": "0.164.0",
+        "startedAt": "2026-10-09T12:00:00Z",
+        "endedAt": "2026-10-09T12:00:05Z"
+      },
+      {
+        "id": "k3",
+        "kind": "update_server",
+        "status": "failed",
+        "output": "Downloading rad 0.12.0 (rad-linux-amd64.tar.gz)…",
+        "error": "rad-linux-amd64.tar.gz doesn't match its checksum in SHA256SUMS",
+        "startedAt": "2026-10-09T12:00:00Z",
+        "endedAt": "2026-10-09T12:00:05Z"
+      }
+    ]
+  }
+}

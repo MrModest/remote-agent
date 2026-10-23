@@ -38,6 +38,7 @@ fun ServerSplitView(
     var archiving by remember { mutableStateOf<SessionRequest?>(null) }
     var deleting by remember { mutableStateOf<SessionRequest?>(null) }
     var removing by remember { mutableStateOf<SavedServer?>(null) }
+    var settingsOf by rememberSaveable { mutableStateOf<String?>(null) }
     val actions = remember {
         SessionActions(
             startSession = { c, projectId ->
@@ -47,6 +48,7 @@ fun ServerSplitView(
             archive = { archiving = it },
             delete = { deleting = it },
             remove = { removing = it },
+            serverSettings = { settingsOf = it.server.value.id },
         )
     }
 
@@ -98,6 +100,9 @@ fun ServerSplitView(
     DeleteSessionDialog(deleting, onDismiss = { deleting = null })
     val removed = removing
     RemoveServerDialog(removed, onDismiss = { removing = null }, onRemove = { removed?.let(onRemoved) })
+    servers.firstOrNull { it.id == settingsOf }?.let { s ->
+        ServerSettingsDialog(s.connection, onDismiss = { settingsOf = null })
+    }
     servers.firstOrNull { it.id == newSessionOn }?.let { s ->
         NewSessionDialog(s.connection, newSessionIn, onDismiss = { newSessionOn = null }, onCreated = { session ->
             newSessionOn = null

@@ -39,11 +39,18 @@ struct SessionActions {
     var archive: (SessionRequest) -> Void = { _ in }
     var delete: (SessionRequest) -> Void = { _ in }
     var remove: (SavedServer) -> Void = { _ in }
+    var manage: (ServerConnection) -> Void = { _ in }
 
     /// A new session on the server, in one of its projects when given.
     func newSession(_ connection: ServerConnection, projectID: String = "") {
         startSession(NewSessionRequest(connection: connection, projectID: projectID))
     }
+}
+
+/// A server whose settings to show.
+struct ServerRequest: Identifiable {
+    let id = UUID()
+    let connection: ServerConnection
 }
 
 /// A new session to start: on a server, in one of its projects, or with ""

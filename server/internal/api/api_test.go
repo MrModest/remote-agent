@@ -29,6 +29,7 @@ import (
 	"remote-agent/internal/model"
 	"remote-agent/internal/orchestrator"
 	"remote-agent/internal/store"
+	"remote-agent/internal/tasks"
 	"remote-agent/internal/terminal"
 )
 
@@ -56,6 +57,9 @@ func startServer(t *testing.T) *testServer {
 	srv.WebOrigins = []string{"localhost:*", "https://web.example"}
 	terms := terminal.NewManager(terminal.Options{Shell: "/bin/sh", Env: []string{"HOME=" + t.TempDir(), "PS1=$ ", "ENV="}, Log: log})
 	srv.Terminals = terms
+	maint := tasks.NewManager(log)
+	srv.Tasks = maint
+	t.Cleanup(maint.Shutdown)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(terms.Shutdown) // first: httptest doesn't wait for the terminal sockets' handlers
@@ -707,5 +711,100 @@ func TestCORS(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || resp.Header.Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
 		t.Errorf("health = %d %v", resp.StatusCode, resp.Header)
+	}
+}
+
+func TestServerManagement(t *testing.T) {
+	s := startServer(t)
+	c := connect(t, s)
+
+	var harnesses struct{ Harnesses []model.HarnessInfo }
+	c.mustCall("harness.list", nil, &harnesses)
+	if caps := harnesses.Harnesses[0].Caps; !caps.Update || !caps.Login || !caps.OneShot {
+		t.Fatalf("fake caps %+v", caps)
+	}
+
+	// Settings.
+	var settings model.ServerSettings
+	c.mustCall("server.settings", nil, &settings)
+	if settings.SystemAgent != nil {
+		t.Fatalf("fresh settings %+v", settings)
+	}
+	if _, err := c.call("server.setSettings", map[string]any{"systemAgent": map[string]string{"harness": "nope"}}); err == nil || err.Code != "invalid" {
+		t.Fatalf("unknown harness: %+v", err)
+	}
+	c.mustCall("server.setSettings", map[string]any{"systemAgent": map[string]string{"harness": "fake", "model": "echo"}}, &settings)
+	c.mustCall("server.settings", nil, &settings)
+	if settings.SystemAgent == nil || settings.SystemAgent.Model != "echo" {
+		t.Fatalf("settings %+v", settings)
+	}
+
+	// No updater: rad says why it can't update.
+	var info model.UpdateInfo
+	c.mustCall("server.checkUpdate", map[string]bool{"refresh": true}, &info)
+	if info.Via != "" || info.Reason == "" || info.Current == "" {
+		t.Fatalf("check %+v", info)
+	}
+	if _, err := c.call("server.update", nil); err == nil || err.Code != "unavailable" {
+		t.Fatalf("update without an updater: %+v", err)
+	}
+
+	// Signing in: the command prints a link and waits for a code.
+	var task model.Task
+	c.mustCall("harness.login", map[string]string{"harness": "fake"}, &task)
+	if task.Kind != model.TaskLogin || task.Harness != "fake" || task.Status != model.TaskRunning {
+		t.Fatalf("login task %+v", task)
+	}
+	poll := func(done func(model.Task) bool) model.Task {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			var got model.Task // absent fields stay unset
+			c.mustCall("task.get", map[string]string{"id": task.ID}, &got)
+			if task = got; done(task) {
+				return task
+			}
+		}
+		t.Fatalf("task %+v", task)
+		return task
+	}
+	poll(func(k model.Task) bool { return k.Input && strings.Contains(k.Output, "Paste code here") })
+	if task.URL != "https://example.com/fake-login?session=42" || !strings.HasPrefix(task.Output, "$ /bin/sh -c") {
+		t.Fatalf("waiting for a code: %+v", task)
+	}
+	c.mustCall("task.input", map[string]string{"id": task.ID, "text": "abc"}, nil)
+	poll(func(k model.Task) bool { return k.Status != model.TaskRunning })
+	if task.Status != model.TaskSucceeded || !strings.Contains(task.Output, "Fake (scripted) is signed in.") || task.Input {
+		t.Fatalf("signed in: %+v", task)
+	}
+
+	// Updating.
+	c.mustCall("harness.update", map[string]string{"harness": "fake"}, &task)
+	poll(func(k model.Task) bool { return k.Status != model.TaskRunning })
+	if task.Status != model.TaskSucceeded || task.Version != "1" || !strings.Contains(task.Output, "Downloading 100%\nFake is up to date.") {
+		t.Fatalf("updated: %+v", task)
+	}
+	if strings.Contains(task.Output, "\nDownloading  50%") {
+		t.Fatalf("the progress line wasn't redrawn: %q", task.Output)
+	}
+
+	// Cancelling a login that waits.
+	c.mustCall("harness.login", map[string]string{"harness": "fake"}, &task)
+	poll(func(k model.Task) bool { return k.Input })
+	c.mustCall("task.cancel", map[string]string{"id": task.ID}, nil)
+	poll(func(k model.Task) bool { return k.Status != model.TaskRunning })
+	if task.Status != model.TaskCancelled {
+		t.Fatalf("cancelled: %+v", task)
+	}
+
+	var list struct{ Tasks []model.Task }
+	c.mustCall("task.list", nil, &list)
+	if len(list.Tasks) != 3 || list.Tasks[2].ID != task.ID {
+		t.Fatalf("list %+v", list.Tasks)
+	}
+	if _, err := c.call("task.get", map[string]string{"id": "nope"}); err == nil || err.Code != "not_found" {
+		t.Fatalf("unknown task: %+v", err)
+	}
+	if _, err := c.call("harness.update", map[string]string{"harness": "nope"}); err == nil || err.Code != "invalid" {
+		t.Fatalf("unknown harness: %+v", err)
 	}
 }

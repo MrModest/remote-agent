@@ -13,10 +13,14 @@ import dev.remoteagent.core.protocol.ImageRef
 import dev.remoteagent.core.protocol.ItemKind
 import dev.remoteagent.core.protocol.OptionKind
 import dev.remoteagent.core.protocol.ServerInfo
+import dev.remoteagent.core.protocol.ServerSettings
+import dev.remoteagent.core.protocol.ServerTask
 import dev.remoteagent.core.protocol.Session
 import dev.remoteagent.core.protocol.SessionStatus
 import dev.remoteagent.core.protocol.SubscribeResult
+import dev.remoteagent.core.protocol.SystemAgent
 import dev.remoteagent.core.protocol.TerminalMessage
+import dev.remoteagent.core.protocol.UpdateInfo
 import dev.remoteagent.core.protocol.WireCoding
 import dev.remoteagent.core.protocol.Workspace
 import dev.remoteagent.core.protocol.get
@@ -139,6 +143,67 @@ class FixtureTests {
         val info = result<ServerInfo>("response_server_info.json")
         assertEquals(true, info.terminal)
         assertEquals("dev1", info.deviceId)
+    }
+
+    @Serializable
+    private data class Tasks(val tasks: List<ServerTask>)
+
+    @Test
+    fun serverManagement() {
+        // The caps older servers leave out are false.
+        val h = result<Harnesses>("response_harness_list.json").harnesses
+        assertTrue(h[0].caps.update && h[0].caps.login && h[0].caps.oneShot)
+        assertTrue(!h[1].caps.update && !h[1].caps.login && !h[1].caps.oneShot)
+
+        val settings = result<ServerSettings>("response_server_settings.json")
+        assertEquals(SystemAgent("claude", "haiku", "low"), settings.systemAgent)
+        // What a client sends: the whole settings, and none without a system agent, which unsets it.
+        assertEquals("{}", WireCoding.json.encodeToString(ServerSettings.serializer(), ServerSettings()))
+        assertEquals(
+            WireCoding.json.parseToJsonElement(fixture("response_server_settings.json")).jsonObject.getValue("result"),
+            WireCoding.json.encodeToJsonElement(ServerSettings.serializer(), settings),
+        )
+
+        val u = result<UpdateInfo>("response_check_update.json")
+        assertEquals("0.11.0", u.current)
+        assertEquals("0.12.0", u.latest)
+        assertTrue(u.available)
+        assertEquals(UpdateInfo.VIA_APP, u.via)
+        assertTrue(u.url!!.endsWith("/v0.12.0"))
+        assertEquals(listOf("Fix the tests"), u.busy)
+        assertNull(u.reason)
+        // `busy` may be missing; `via` keeps a way this app doesn't know.
+        val bare = WireCoding.json.decodeFromString(UpdateInfo.serializer(), """{"current":"dev","available":false,"via":"brew"}""")
+        assertEquals(emptyList(), bare.busy)
+        assertEquals("brew", bare.via)
+
+        val t = result<ServerTask>("response_task.json")
+        assertEquals(ServerTask.LOGIN, t.kind)
+        assertEquals("claude", t.harness)
+        assertEquals(ServerTask.Status.RUNNING, t.status)
+        assertTrue(t.running && t.input)
+        assertEquals("https://claude.com/cai/oauth/authorize?code=true", t.url)
+        assertTrue(t.output.endsWith("Paste code here if prompted >"))
+        assertNull(t.endedAt)
+
+        val list = result<Tasks>("response_task_list.json").tasks
+        assertEquals(listOf("k2", "k3"), list.map { it.id })
+        assertEquals(listOf(ServerTask.UPDATE_AGENT, ServerTask.UPDATE_SERVER), list.map { it.kind })
+        assertEquals(listOf(ServerTask.Status.SUCCEEDED, ServerTask.Status.FAILED), list.map { it.status })
+        assertEquals("0.164.0", list[0].version)
+        assertEquals(Instant.parse("2026-10-09T12:00:05Z"), list[0].endedAt)
+        assertNull(list[1].harness)
+        assertTrue(!list[1].input)
+        assertTrue(list[1].error!!.contains("checksum"))
+
+        // A newer server's kinds and statuses decode: the kind as sent, the status as ended.
+        val future = WireCoding.json.decodeFromString(
+            ServerTask.serializer(),
+            """{"id":"k9","kind":"reindex","status":"paused","output":"","startedAt":"2026-10-09T12:00:00Z"}""",
+        )
+        assertEquals("reindex", future.kind)
+        assertEquals(ServerTask.Status.UNKNOWN, future.status)
+        assertTrue(!future.running)
     }
 
     @Test

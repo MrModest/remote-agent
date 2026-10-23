@@ -25,6 +25,16 @@ enum Platform {
         #endif
     }
 
+    /// Puts text on the pasteboard.
+    @MainActor static func copy(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #else
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
+    }
+
     /// The pasteboard holds an image. Checking doesn't make iOS ask to paste.
     @MainActor static var pasteboardHasImages: Bool {
         #if os(iOS)

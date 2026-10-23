@@ -7,6 +7,7 @@ struct ServerHomeView: View {
     let connection: ServerConnection
     @Environment(\.dismiss) private var dismiss
     @State private var removing: SavedServer?
+    @State private var showSettings = false
     @State private var showNew = false
     @State private var openSession: String?
     @State private var showArchived = false
@@ -44,6 +45,10 @@ struct ServerHomeView: View {
                     Button("Reconnect", systemImage: "arrow.clockwise") { connection.retry() }
                 }
                 ToolbarItem(placement: .secondaryAction) {
+                    Button("Server Settings", systemImage: "gearshape.2") { showSettings = true }
+                        .disabled(connection.state != .connected)
+                }
+                ToolbarItem(placement: .secondaryAction) {
                     SettingsButton()
                 }
                 ToolbarItem(placement: .secondaryAction) {
@@ -56,6 +61,10 @@ struct ServerHomeView: View {
                     openSession = session.id
                 }
                 .appStyle()
+            }
+            .sheet(isPresented: $showSettings) {
+                ServerSettingsView(connection: connection)
+                    .appStyle()
             }
             .archiveSessionDialog($archiving)
             .deleteSessionDialog($deleting)

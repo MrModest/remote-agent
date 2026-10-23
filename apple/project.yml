@@ -168,6 +168,9 @@ targets:
         SUFeedURL: https://github.com/buldezir/remote-agent/releases/latest/download/Remote-Agent-Server-macOS-appcast.xml
         SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
         SUEnableAutomaticChecks: true
+        # Downloads updates by itself, so that a client can install one
+        # without anyone at the Mac (AppUpdater.installForClient).
+        SUAutomaticallyUpdate: true
         LSUIElement: true                 # menu bar only, no Dock icon
         LSApplicationCategoryType: public.app-category.developer-tools
         # rad and the agents it starts run as this app's children, so macOS

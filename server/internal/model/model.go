@@ -344,6 +344,9 @@ type HarnessCaps struct {
 	SetMode     bool `json:"setMode"`
 	FreeModel   bool `json:"freeModel"` // client may type an arbitrary model id
 	ModelSelect bool `json:"modelSelect"`
+	Update      bool `json:"update,omitempty"`  // harness.update runs the CLI's own update
+	Login       bool `json:"login,omitempty"`   // harness.login signs the CLI in again
+	OneShot     bool `json:"oneShot,omitempty"` // can be the system agent (ServerSettings)
 }
 
 type HarnessInfo struct {
@@ -360,6 +363,74 @@ type HarnessInfo struct {
 	DefaultMode string      `json:"defaultMode,omitempty"`
 	Commands    []Command   `json:"commands,omitempty"` // slash commands the apps offer in a menu
 	Caps        HarnessCaps `json:"caps"`
+}
+
+// SystemAgent is the agent, and its model, that does rad's own small jobs:
+// naming sessions and their worktree branches. Its calls run without tools
+// and leave no conversation behind.
+type SystemAgent struct {
+	Harness string `json:"harness"`
+	Model   string `json:"model,omitempty"`  // empty: the harness's default
+	Effort  string `json:"effort,omitempty"` // empty: the model's default
+}
+
+// ServerSettings are the settings clients change (server.setSettings), as
+// opposed to the config file's.
+type ServerSettings struct {
+	// SystemAgent names sessions and worktree branches from the first
+	// prompt; nil: the title is the prompt's first line.
+	SystemAgent *SystemAgent `json:"systemAgent,omitempty"`
+}
+
+// UpdateInfo is what server.checkUpdate finds out about rad's releases.
+type UpdateInfo struct {
+	Current   string `json:"current"`
+	Latest    string `json:"latest,omitempty"` // empty: the lookup failed (Reason says why)
+	URL       string `json:"url,omitempty"`    // the latest release's page
+	Available bool   `json:"available"`        // Latest is newer than Current
+	// Via is how an update installs: "rad" replaces its own binary and
+	// restarts, "app" has the Remote Agent Server app update itself.
+	// Empty: it can't from here, and Reason says why.
+	Via    string   `json:"via,omitempty"`
+	Reason string   `json:"reason,omitempty"`
+	Busy   []string `json:"busy"` // titles of the sessions a restart would interrupt
+}
+
+type TaskKind string
+
+const (
+	TaskUpdateServer TaskKind = "update_server"
+	TaskUpdateAgent  TaskKind = "update_agent"
+	TaskLogin        TaskKind = "login"
+)
+
+type TaskStatus string
+
+const (
+	TaskRunning   TaskStatus = "running"
+	TaskSucceeded TaskStatus = "succeeded"
+	TaskFailed    TaskStatus = "failed"
+	TaskCancelled TaskStatus = "cancelled"
+)
+
+// Task is a maintenance job a client started: updating rad or an agent, or
+// signing an agent in. Clients poll it with task.get while it runs.
+type Task struct {
+	ID      string     `json:"id"`
+	Kind    TaskKind   `json:"kind"`
+	Harness string     `json:"harness,omitempty"` // update_agent, login
+	Status  TaskStatus `json:"status"`
+	// Output is what the command printed, as a terminal would show it,
+	// without colours: its last lines.
+	Output string `json:"output"`
+	URL    string `json:"url,omitempty"`   // the last web address in the output, such as a sign-in page
+	Input  bool   `json:"input,omitempty"` // takes typed lines (task.input), such as a code to paste
+	Error  string `json:"error,omitempty"`
+	// Version is, for an update, the version installed; for a login, the
+	// agent's version.
+	Version   string     `json:"version,omitempty"`
+	StartedAt time.Time  `json:"startedAt"`
+	EndedAt   *time.Time `json:"endedAt,omitempty"`
 }
 
 // TerminalMessage is a text frame on a terminal socket (GET /v1/terminal).

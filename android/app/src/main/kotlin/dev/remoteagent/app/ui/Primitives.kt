@@ -299,6 +299,7 @@ fun FormTextField(
     maxLines: Int = 1,
     minLines: Int = 1,
     keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
 ) {
     androidx.compose.foundation.text.BasicTextField(
         value = value,
@@ -309,6 +310,7 @@ fun FormTextField(
         maxLines = maxLines,
         minLines = minLines,
         keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
         decorationBox = { inner ->
             Box {

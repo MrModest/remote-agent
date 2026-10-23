@@ -304,6 +304,60 @@ await page.getByRole("button", { name: "Archive" }).first().click();
 await page.getByRole("button", { name: "Archive", exact: true }).last().click();
 await page.getByText(/Archived/).waitFor();
 
+step("server settings: update and sign in the fake agent, and name sessions with it");
+const fake = "Fake (scripted)";
+const openServerSettings = async () => {
+  await page.locator(".server-header").hover();
+  await page.getByRole("button", { name: / actions$/ }).click();
+  await page.getByRole("menuitem", { name: "Server Settings…" }).click();
+  await page.locator(".modal-subtitle", { hasText: "Server" }).waitFor();
+  await page.waitForFunction(() => !document.body.innerText.includes("Checking for updates…"));
+};
+const fakeMenu = async (item) => {
+  await page.getByRole("button", { name: `${fake} actions` }).click();
+  await page.getByRole("menuitem", { name: item, exact: true }).click();
+};
+const closeTask = () => page.getByRole("button", { name: "Done" }).last().click();
+const systemAgent = page.getByLabel(/^Agent/);
+await openServerSettings();
+await page.getByText("rad dev is a development build, which doesn't update itself.").waitFor();
+await page.locator(".harness-row", { hasText: fake }).getByText("Ready").waitFor();
+await shot("server-settings");
+await fakeMenu("Update");
+await page.getByRole("heading", { name: `Updating ${fake}` }).waitFor();
+await page.locator(".task-status", { hasText: `${fake} 1` }).waitFor();
+await shot("server-task-updated");
+await closeTask();
+await fakeMenu("Sign In Again");
+await page.getByText("Waiting for you to sign in…").waitFor();
+await page.getByPlaceholder("Paste the code here").waitFor();
+await shot("server-task-sign-in");
+// The sign-in page opens in a tab of its own, without the network.
+await context.route("https://example.com/**", (r) => r.fulfill({ body: "<h1>Sign in</h1>", contentType: "text/html" }));
+const [signInPage] = await Promise.all([context.waitForEvent("page"), page.getByRole("button", { name: "Open Sign-In Page" }).click()]);
+if (signInPage.url() !== "https://example.com/fake-login?session=42") throw new Error("Open Sign-In Page opened " + signInPage.url());
+await signInPage.close();
+await page.getByPlaceholder("Paste the code here").fill("code42");
+await page.getByRole("button", { name: "Send", exact: true }).click();
+await page.locator(".task-status", { hasText: "Signed in." }).waitFor();
+await shot("server-task-signed-in");
+await closeTask();
+await systemAgent.selectOption({ label: fake });
+await page.getByLabel(/^Model/).waitFor();
+await page.getByRole("button", { name: "Done" }).click();
+await page.getByRole("button", { name: "New session" }).first().click();
+await page.locator(".form-row", { hasText: "Project" }).locator("select").selectOption({ label: project });
+await page.locator(".harness-row", { hasText: "Fake" }).click();
+await page.getByPlaceholder("What should the agent do?").fill("tidy up the readme please");
+await page.getByRole("button", { name: "Start", exact: true }).click();
+await page.locator(".session-heading h1", { hasText: "Named: tidy up the readme" }).waitFor();
+await shot("named-session");
+// Back to no system agent.
+await openServerSettings();
+await systemAgent.selectOption({ label: "None" });
+await page.getByLabel(/^Model/).waitFor({ state: "detached" });
+await page.getByRole("button", { name: "Done" }).click();
+
 step("remove server");
 await page.locator(".server-header").hover();
 await page.getByRole("button", { name: / actions$/ }).click();

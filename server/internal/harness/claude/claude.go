@@ -97,7 +97,7 @@ func (h *Harness) Probe(ctx context.Context) model.HarnessInfo {
 	var init initResponse
 	json.Unmarshal(res, &init)
 	info.Models, info.Efforts = init.choices()
-	info.AuthOK = init.Account != nil
+	info.AuthOK = init.signedIn()
 	if !info.AuthOK {
 		info.Hint = "Not logged in: run `claude` on this machine and sign in"
 	}
@@ -113,8 +113,18 @@ type initResponse struct {
 		SupportsEffort        bool     `json:"supportsEffort"`
 		SupportedEffortLevels []string `json:"supportedEffortLevels"`
 	} `json:"models"`
-	Account               *json.RawMessage `json:"account"`
-	CurrentPermissionMode string           `json:"current_permission_mode"`
+	Account *struct {
+		TokenSource string `json:"tokenSource"`
+		APIProvider string `json:"apiProvider"`
+	} `json:"account"`
+	CurrentPermissionMode string `json:"current_permission_mode"`
+}
+
+// signedIn: Claude Code reports an account with "tokenSource": "none" when
+// it has no login. Bedrock, Vertex and the like sign in on their own.
+func (i *initResponse) signedIn() bool {
+	a := i.Account
+	return a != nil && (a.TokenSource != "none" || a.APIProvider != "" && a.APIProvider != "firstParty")
 }
 
 func (h *Harness) Open(ctx context.Context, o harness.OpenOptions) (harness.Runtime, error) {

@@ -309,6 +309,19 @@ public final class ServerConnection {
         }
     }
 
+    /// Returns once connected, or throws after `limit`.
+    private func waitUntilConnected(for limit: Duration) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await self.waitUntilConnected() }
+            group.addTask {
+                try await Task.sleep(for: limit)
+                throw RPCError.disconnected
+            }
+            defer { group.cancelAll() }
+            try await group.next()
+        }
+    }
+
     /// Returns once connected. While paused (the app is in the background)
     /// it waits for the app to come back.
     private func waitUntilConnected() async throws {
@@ -429,6 +442,42 @@ public final class ServerConnection {
         let _: Empty = try await client.call("session.delete", P(sessionId: sessionID, removeWorktree: removeWorktree))
     }
 
+    // MARK: Server management
+
+    public func settings() async throws -> ServerSettings {
+        try await client.call("server.settings")
+    }
+
+    /// Replaces the server's settings; returns them as the server keeps them.
+    public func setSettings(_ settings: ServerSettings) async throws -> ServerSettings {
+        try await client.call("server.setSettings", settings)
+    }
+
+    /// Whether rad has an update; `refresh` asks GitHub again.
+    public func checkUpdate(refresh: Bool = false) async throws -> UpdateInfo {
+        try await client.call("server.checkUpdate", ["refresh": refresh], timeout: 45)
+    }
+
+    /// Installs rad's latest release, which restarts it.
+    public func updateServer() async throws -> ServerTask {
+        try await client.call("server.update")
+    }
+
+    public func updateHarness(_ id: String) async throws -> ServerTask {
+        try await client.call("harness.update", ["harness": id])
+    }
+
+    public func loginHarness(_ id: String) async throws -> ServerTask {
+        try await client.call("harness.login", ["harness": id])
+    }
+
+    /// The tasks that run on the server, and those that ended lately.
+    public func tasks() async throws -> [ServerTask] {
+        struct Res: Decodable, Sendable { var tasks: [ServerTask] }
+        let r: Res = try await client.call("task.list")
+        return r.tasks
+    }
+
     // MARK: Derived
 
     public var activeSessions: [Session] {
@@ -441,6 +490,35 @@ public final class ServerConnection {
 
     public var sortedProjects: [Project] {
         projects.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+}
+
+extension ServerConnection: TaskSource {
+    public func task(_ id: String) async throws -> ServerTask {
+        try await client.call("task.get", ["id": id])
+    }
+
+    /// Waits for the connection, which iOS drops while the user is in the
+    /// browser signing in, but sends once: again would type the line twice.
+    public func taskInput(_ id: String, text: String) async throws {
+        try await waitUntilConnected(for: .seconds(10))
+        let _: Empty = try await client.call("task.input", ["id": id, "text": text])
+    }
+
+    public func cancelTask(_ id: String) async throws {
+        try await waitUntilConnected(for: .seconds(10))
+        let _: Empty = try await client.call("task.cancel", ["id": id])
+    }
+
+    /// rad may take longer to restart than the connection keeps trying.
+    public func reviveConnection() {
+        if case .failed = state { retry() }
+    }
+
+    public var serverVersion: String? { info?.version }
+
+    public func taskEnded(_ task: ServerTask) async {
+        await refreshHarnesses(force: true)
     }
 }
 

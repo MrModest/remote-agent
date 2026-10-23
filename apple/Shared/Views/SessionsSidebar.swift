@@ -359,7 +359,8 @@ struct ServerHeader: View {
     }
 }
 
-/// A server's actions, for its menus: a new session, reconnecting, removing it.
+/// A server's actions, for its menus: a new session, reconnecting, its
+/// settings, removing it.
 struct ServerMenuItems: View {
     let connection: ServerConnection
     @Environment(\.sessionActions) private var actions
@@ -369,6 +370,8 @@ struct ServerMenuItems: View {
         Button("New Session on \(name)", systemImage: "plus") { actions.newSession(connection) }
             .disabled(connection.state != .connected)
         Button("Reconnect", systemImage: "arrow.clockwise") { connection.retry() }
+        Button("Server Settings…", systemImage: "gearshape.2") { actions.manage(connection) }
+            .disabled(connection.state != .connected)
         Divider()
         Button("Remove \(name)…", systemImage: "trash", role: .destructive) { actions.remove(connection.server) }
     }

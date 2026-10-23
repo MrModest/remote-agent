@@ -1,0 +1,13 @@
+{
+  "id": 10,
+  "result": {
+    "id": "k1",
+    "kind": "login",
+    "harness": "claude",
+    "status": "running",
+    "output": "$ claude auth login\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\nPaste code here if prompted \u003e",
+    "url": "https://claude.com/cai/oauth/authorize?code=true",
+    "input": true,
+    "startedAt": "2026-10-09T12:00:00Z"
+  }
+}

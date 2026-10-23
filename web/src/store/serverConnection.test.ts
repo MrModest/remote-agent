@@ -5,8 +5,10 @@ import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RPCClient, RPCError } from "../protocol/rpc";
+import type { ServerTask } from "../protocol/models";
 import { ServerConnection } from "./serverConnection";
 import type { SavedServer } from "./serverStore";
+import { ServerTaskProgress } from "./serverTask";
 
 function saved(url: string): SavedServer {
   return { id: "srv", name: "Test", urls: [url], deviceId: "dev1", addedAt: "2026-10-09T12:00:00Z" };
@@ -54,7 +56,11 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *  says it closed. As apple/RAKit/Tests/RAKitTests/TestServer.swift. */
 class TestServer {
   /** Every call that arrived, answered or not. */
-  calls: { connection: number; method: string; commandId?: string }[] = [];
+  calls: { connection: number; method: string; commandId?: string; params?: any }[] = [];
+  /** The version `server.info` reports. */
+  version = "0.1";
+  /** Answers for other methods: a result, or an error to send. */
+  handlers: Record<string, (params: any) => object | RPCError> = {};
   private http = createServer((_, res) => res.writeHead(404).end());
   private sockets: Duplex[] = [];
   private quietCount = 0;
@@ -70,6 +76,11 @@ class TestServer {
     for (const s of this.sockets) s.destroy();
     this.http.closeAllConnections();
     await new Promise((r) => this.http.close(r));
+  }
+
+  /** Closes every socket, as rad does when it restarts. */
+  drop() {
+    for (const s of this.sockets) s.destroy();
   }
 
   /** The sockets open now stop answering; later ones answer. */
@@ -106,10 +117,17 @@ class TestServer {
 
   private answer(socket: Duplex, n: number, text: string, quiet: boolean) {
     const req = JSON.parse(text);
-    this.calls.push({ connection: n, method: req.method, commandId: req.params?.commandId });
+    this.calls.push({ connection: n, method: req.method, commandId: req.params?.commandId, params: req.params });
     if (quiet || req.method === "slow") return;
     let result: object = {};
-    if (req.method === "server.info") result = { serverId: "srv", name: "Test", protocolVersion: 1, version: "0.1" };
+    const handler = this.handlers[req.method];
+    if (handler) {
+      const r = handler(req.params);
+      const reply = r instanceof RPCError ? { id: req.id, error: { code: r.code, message: r.message } } : { id: req.id, result: r };
+      socket.write(textFrame(JSON.stringify(reply)));
+      return;
+    }
+    if (req.method === "server.info") result = { serverId: "srv", name: "Test", protocolVersion: 1, version: this.version };
     if (req.method === "session.prompt") {
       const at = "2026-01-01T00:00:00Z";
       result = { id: "i" + req.id, sessionId: req.params.sessionId, order: 1, kind: "user_message", status: "queued", createdAt: at, updatedAt: at };
@@ -287,6 +305,89 @@ describe("ServerConnection", () => {
       expect(store.outbox.size).toBe(0);
     } finally {
       c.stop();
+    }
+  });
+});
+
+describe("ServerConnection's server management", () => {
+  const at = "2026-10-09T12:00:00Z";
+  const update = (status: string, version?: string): ServerTask => ({ id: "k1", kind: "update_server", status, output: "Downloading rad 0.2…", version, startedAt: at });
+
+  it("calls the server's methods", async () => {
+    const server = new TestServer();
+    server.handlers["server.checkUpdate"] = () => ({ current: "0.1", reason: "rad 0.1 is a development build, which doesn't update itself." });
+    server.handlers["server.settings"] = () => ({});
+    server.handlers["server.setSettings"] = (p) => p;
+    server.handlers["task.list"] = () => ({});
+    server.handlers["harness.login"] = (p) => ({ id: "k2", kind: "login", harness: p.harness, status: "running", startedAt: at });
+    const c = await connect(server);
+    try {
+      // Fields an older server leaves out come in as their defaults.
+      expect(await c.checkUpdate(true)).toMatchObject({ current: "0.1", available: false, busy: [] });
+      expect(server.calls.find((m) => m.method === "server.checkUpdate")?.params).toEqual({ refresh: true });
+      expect(await c.settings()).toEqual({});
+      const s = { systemAgent: { harness: "fake", model: "m1" } };
+      expect(await c.setSettings(s)).toEqual(s);
+      // No system agent: the whole settings, without it.
+      expect(await c.setSettings({ systemAgent: undefined })).toEqual({});
+      expect(await c.tasks()).toEqual([]);
+      expect(await c.loginHarness("fake")).toMatchObject({ id: "k2", harness: "fake", output: "" });
+      await c.taskInput("k2", "abc");
+      await c.cancelTask("k2");
+      expect(server.calls.filter((m) => m.method.startsWith("task.")).map((m) => [m.method, m.params])).toEqual([
+        ["task.list", {}],
+        ["task.input", { id: "k2", text: "abc" }],
+        ["task.cancel", { id: "k2" }],
+      ]);
+    } finally {
+      c.stop();
+      await server.stop();
+    }
+  });
+
+  it("follows an update of rad through its restart", async () => {
+    const server = new TestServer();
+    let polls = 0;
+    server.handlers["server.update"] = () => update("running");
+    server.handlers["task.get"] = (p) => (p.id !== "k1" ? new RPCError("not_found", "no such task") : ++polls < 2 ? update("running") : update("succeeded", "0.2"));
+    const c = await connect(server);
+    try {
+      const p = new ServerTaskProgress(await c.updateServer(), c);
+      p.interval = 0.01;
+      p.start();
+      await waitFor(() => p.phase.kind === "restarting");
+      // rad restarts as the new version; the connection comes back to it.
+      server.version = "0.2";
+      server.drop();
+      await waitFor(() => p.phase.kind === "done");
+      expect(c.info?.version).toBe("0.2");
+      expect(server.connectionCount).toBe(2);
+      p.stop();
+    } finally {
+      c.stop();
+      await server.stop();
+    }
+  });
+
+  it("looks at the agents again once one signed in", async () => {
+    const server = new TestServer();
+    let signedIn = false;
+    server.handlers["harness.list"] = () => ({ harnesses: [{ id: "fake", name: "Fake", protocol: "fake", installed: true, authOk: signedIn, caps: {} }] });
+    server.handlers["harness.login"] = () => ({ id: "k3", kind: "login", harness: "fake", status: "running", output: "", startedAt: at });
+    server.handlers["task.get"] = () => ({ id: "k3", kind: "login", harness: "fake", status: signedIn ? "succeeded" : "running", output: "", startedAt: at });
+    const c = await connect(server);
+    try {
+      await waitFor(() => c.harnesses?.[0]?.authOk === false);
+      const p = new ServerTaskProgress(await c.loginHarness("fake"), c);
+      p.interval = 0.01;
+      p.start();
+      signedIn = true;
+      await waitFor(() => p.phase.kind === "done");
+      await waitFor(() => c.harnesses?.[0]?.authOk === true);
+      expect(server.calls.filter((m) => m.method === "harness.list").map((m) => m.params)).toEqual([{ refresh: false }, { refresh: true }]);
+    } finally {
+      c.stop();
+      await server.stop();
     }
   });
 });

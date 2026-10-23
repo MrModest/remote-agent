@@ -5,10 +5,12 @@ import Sparkle
 /// The app's updates, through Sparkle: it reads the latest release's feed
 /// (SUFeedURL, written by scripts/appcast.sh) once a day, and an update brings
 /// its own rad. A menu bar app shouldn't put a window in front of the user's
-/// work, so an update that a daily check finds waits in the menu, where
-/// choosing it opens Sparkle's dialog. Installing restarts the app, and so
-/// rad: if that would interrupt sessions, it asks first. Only release builds
-/// update; a build from Xcode is version 0.1.
+/// work, so the daily check downloads an update by itself
+/// (SUAutomaticallyUpdate), and the menu offers to install it; otherwise it
+/// installs when the app quits. Installing restarts the app, and so rad: if
+/// that would interrupt sessions, it asks first. A client can ask for the
+/// update too, through rad (installForClient). Only release builds update; a
+/// build from Xcode is version 0.1.
 @MainActor @Observable
 final class AppUpdater: NSObject {
     /// The version a daily check found, until the user looks at it.
@@ -22,10 +24,14 @@ final class AppUpdater: NSObject {
     @ObservationIgnored private var controller: SPUStandardUpdaterController?
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private var install: (() -> Void)?
+    /// A client asked for the update, through rad: it installs as soon as
+    /// it's downloaded, and rad hears how it goes.
+    @ObservationIgnored private var clientAsked = false
 
     init(rad: RadSupervisor) {
         self.rad = rad
         super.init()
+        rad.onUpdateRequest = { [weak self] _ in self?.installForClient() }
     }
 
     func start() {
@@ -45,6 +51,30 @@ final class AppUpdater: NSObject {
     /// Installs the postponed update, which restarts the app.
     func installPostponed() {
         Task { await installIfIdle() }
+    }
+
+    /// A client asked rad for the latest release (server.update). The user
+    /// isn't at the Mac, so the app installs it without asking, now if it's
+    /// downloaded already, else once it is.
+    func installForClient() {
+        guard let controller else {
+            rad.send(UpdateStatus(status: "failed", message: "This build of Remote Agent Server doesn't update itself."))
+            return
+        }
+        clientAsked = true
+        if let install {
+            rad.send(UpdateStatus(status: "installing", version: postponed))
+            self.install = nil
+            postponed = nil
+            install()
+            return
+        }
+        rad.send(UpdateStatus(status: "checking"))
+        // A session already under way, such as a download, ends in the
+        // delegate calls below too.
+        if !controller.updater.sessionInProgress {
+            controller.updater.checkForUpdatesInBackground()
+        }
     }
 
     /// Calls Sparkle's install handler once rad has no sessions to interrupt,
@@ -83,10 +113,44 @@ extension AppUpdater: SPUUpdaterDelegate {
     /// Sparkle is about to quit the app, which stops rad and its agents.
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        if clientAsked {
+            rad.send(UpdateStatus(status: "installing", version: item.displayVersionString))
+            return false
+        }
         install = installHandler
         postponed = item.displayVersionString
         Task { await installIfIdle() }
         return true
+    }
+
+    /// The daily check downloaded an update. It waits in the menu, and
+    /// installs when the app quits; a client's request installs it now.
+    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
+        if clientAsked {
+            rad.send(UpdateStatus(status: "installing", version: item.displayVersionString))
+            immediateInstallHandler()
+        } else {
+            install = immediateInstallHandler
+            postponed = item.displayVersionString
+        }
+        return true
+    }
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        if clientAsked { rad.send(UpdateStatus(status: "downloading", version: item.displayVersionString)) }
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        guard clientAsked else { return }
+        clientAsked = false
+        rad.send(UpdateStatus(status: "upToDate", message: "Remote Agent Server \(RadBinary.bundledVersion) is the latest version."))
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
+        guard clientAsked, (error as NSError).code != Int(SUError.noUpdateError.rawValue) else { return }
+        clientAsked = false
+        rad.send(UpdateStatus(status: "failed", message: error.localizedDescription))
     }
 }
 

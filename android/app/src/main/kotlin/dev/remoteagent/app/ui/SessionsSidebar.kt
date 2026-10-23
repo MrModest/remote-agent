@@ -307,12 +307,14 @@ fun ProjectMenu(expanded: Boolean, onDismiss: () -> Unit, s: ServerState, projec
     }
 }
 
-/** A server's actions, for its menus: a new session, reconnecting, removing it. */
+/** A server's actions, for its menus: a new session, reconnecting, its settings, removing it. */
 @Composable
 fun ServerMenuItems(s: ServerState, dismiss: () -> Unit) {
     val actions = LocalSessionActions.current
-    MenuItem("New session on ${s.name}", Icons.add, enabled = s.state == ConnectionState.Connected) { dismiss(); actions.newSession(s.connection) }
+    val connected = s.state == ConnectionState.Connected
+    MenuItem("New session on ${s.name}", Icons.add, enabled = connected) { dismiss(); actions.newSession(s.connection) }
     MenuItem("Reconnect", Icons.reconnect) { dismiss(); s.connection.retry() }
+    MenuItem("Server Settings…", Icons.serverSettings, enabled = connected) { dismiss(); actions.serverSettings(s.connection) }
     HorizontalDivider(color = palette.surface0)
     MenuItem("Remove ${s.name}…", Icons.delete, color = palette.red) { dismiss(); actions.remove(s.server) }
 }

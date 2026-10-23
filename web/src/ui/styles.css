@@ -800,6 +800,22 @@ dialog::backdrop {
   text-overflow: ellipsis;
   max-width: 50vw;
 }
+.title-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+.title-stack > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modal-subtitle {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--subtext);
+}
 .modal-bar-side {
   display: flex;
   align-items: center;
@@ -911,6 +927,52 @@ button.form-row:hover:not(:disabled) { background: var(--surface0); }
   flex-direction: column;
   gap: 2px;
 }
+.form-row.stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+.task-row { text-align: left; }
+
+/* Server tasks: an update or a sign-in as it goes */
+.task-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 20px;
+}
+.task-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-input {
+  display: flex;
+  gap: 8px;
+}
+.task-input .text-field {
+  flex: 1;
+  max-width: none;
+  font-family: var(--code-font);
+}
+.task-output {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-field);
+  background: var(--base);
+  font-family: var(--code-font);
+  font-size: 0.86em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 50vh;
+  overflow-y: auto;
+  user-select: text;
+}
+
 .folder-row { text-align: left; }
 .folder-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .chip-tag {

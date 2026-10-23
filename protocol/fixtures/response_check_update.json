@@ -1,0 +1,13 @@
+{
+  "id": 9,
+  "result": {
+    "current": "0.11.0",
+    "latest": "0.12.0",
+    "url": "https://github.com/buldezir/remote-agent/releases/tag/v0.12.0",
+    "available": true,
+    "via": "app",
+    "busy": [
+      "Fix the tests"
+    ]
+  }
+}

@@ -46,6 +46,8 @@ class SessionActions(
     val archive: (SessionRequest) -> Unit = {},
     val delete: (SessionRequest) -> Unit = {},
     val remove: (SavedServer) -> Unit = {},
+    /** Opens the server's settings: its updates, agents and system agent. */
+    val serverSettings: (ServerConnection) -> Unit = {},
 ) {
     /** A new session on the server, in one of its projects when given. */
     fun newSession(connection: ServerConnection, projectId: String? = null) = startSession(connection, projectId)

@@ -88,6 +88,29 @@ func (s *Store) ServerID(ctx context.Context) (string, error) {
 	return s.ServerID(ctx)
 }
 
+// Settings returns the settings clients have set, or none.
+func (s *Store) Settings(ctx context.Context) (model.ServerSettings, error) {
+	var st model.ServerSettings
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='settings'`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return st, nil
+	} else if err != nil {
+		return st, err
+	}
+	return st, json.Unmarshal([]byte(raw), &st)
+}
+
+func (s *Store) SetSettings(ctx context.Context, st model.ServerSettings) error {
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES('settings', ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(raw))
+	return err
+}
+
 // W is a write transaction. Methods that change entities also emit events.
 type W struct {
 	ctx    context.Context

@@ -50,6 +50,12 @@ func CurrentBranch(ctx context.Context, dir string) string {
 	return strings.TrimSpace(out)
 }
 
+// RenameBranch renames a branch, also the one checked out in dir.
+func RenameBranch(ctx context.Context, dir, from, to string) error {
+	_, err := run(ctx, dir, nil, "branch", "-m", from, to)
+	return err
+}
+
 func Branches(ctx context.Context, dir string) ([]string, error) {
 	out, err := run(ctx, dir, nil, "for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "refs/heads")
 	if err != nil {
